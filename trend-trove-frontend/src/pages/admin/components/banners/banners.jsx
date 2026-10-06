@@ -95,7 +95,7 @@ const Banners = () => {
 
   const handleConfirmDelete = async () => {
     try {
-      await axiosInstance.delete(`/banners/delete/${bannerToDelete}`);
+      await axios.delete(`${process.env.NEXT_PUBLIC_API_URL}/banners/delete/${bannerToDelete}`);
       setBannersData((prevData) =>
         prevData.filter((banner) => banner._id !== bannerToDelete)
       );
@@ -110,7 +110,7 @@ const Banners = () => {
 
   const handleToggleStatus = async (bannerId) => {
     try {
-      await axiosInstance.patch(`/banners/toggle/${bannerId}`);
+      await axios.patch(`${process.env.NEXT_PUBLIC_API_URL}/banners/toggle/${bannerId}`);
       setBannersData((prevData) =>
         prevData.map((banner) =>
           banner._id === bannerId 
