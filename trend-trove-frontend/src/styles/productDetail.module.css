@@ -1,0 +1,4 @@
+.zoomable-image:hover {
+    transform: scale(1.2); /* Zoom in */
+    cursor: pointer;
+  }
