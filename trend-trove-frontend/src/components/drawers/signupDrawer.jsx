@@ -176,98 +176,94 @@ const SignupDrawer = ({ open, onClose }) => {
   const [otpModalOpen, setOtpModalOpen] = useState(false);
   const [referralCode, setReferralCode] = useState("");
 
-  const validateForm = () => {
-    // Check if all fields are filled
-    if (!image || !firstName || !lastName || !userName || !email || !password || !confirmPassword) {
-      setSnackbarMessage("All fields are required");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-      return false;
-    }
+  // Field-level errors
+  const [errors, setErrors] = useState({});
 
-    // Validate image type
-    const allowedTypes = ["image/jpeg", "image/png"];
-    if (!allowedTypes.includes(image.type)) {
-      setSnackbarMessage("Invalid file type. Only JPEG or PNG images are allowed.");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-      return false;
-    }
+  // Validation rules
+  const nameRegex = /^[A-Za-z][A-Za-z\s'-]{0,48}[A-Za-z]$|^[A-Za-z]$/;
+  const usernameRegex = /^[A-Za-z0-9_]{3,30}$/;
+  const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 
-    // Validate text fields (only letters)
-    const textRegex = /^[A-Za-z]+$/;
-    if (!textRegex.test(firstName)) {
-      setSnackbarMessage("First name should only contain letters and no spaces or special characters");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-      return false;
+  const validateField = (name, value) => {
+    switch (name) {
+      case "firstName":
+        if (!value.trim()) return "First name is required";
+        if (!nameRegex.test(value.trim())) return "First name must contain only letters (and spaces/hyphens between letters)";
+        return "";
+      case "lastName":
+        if (!value.trim()) return "Last name is required";
+        if (!nameRegex.test(value.trim())) return "Last name must contain only letters (and spaces/hyphens between letters)";
+        return "";
+      case "userName":
+        if (!value.trim()) return "Username is required";
+        if (value.length < 3) return "Username must be at least 3 characters";
+        if (!usernameRegex.test(value)) return "Username can only contain letters, numbers and underscores";
+        return "";
+      case "email":
+        if (!value.trim()) return "Email is required";
+        if (!emailRegex.test(value.trim())) return "Please enter a valid email address";
+        return "";
+      case "password":
+        if (!value) return "Password is required";
+        if (value.length < 8) return "Password must be at least 8 characters";
+        return "";
+      case "confirmPassword":
+        if (!value) return "Please confirm your password";
+        if (value !== password) return "Passwords do not match";
+        return "";
+      default:
+        return "";
     }
+  };
 
-    if (!textRegex.test(lastName)) {
-      setSnackbarMessage("Last name should only contain letters and no spaces or special characters");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-      return false;
+  const handleFieldChange = (name, value) => {
+    // Update field value
+    switch (name) {
+      case "firstName": setFirstName(value); break;
+      case "lastName": setLastName(value); break;
+      case "userName": setUserName(value); break;
+      case "email": setEmail(value); break;
+      case "password": setPassword(value); break;
+      case "confirmPassword": setConfirmPassword(value); break;
     }
+    // Clear error on change
+    setErrors((prev) => ({ ...prev, [name]: "" }));
+  };
 
-    if (!textRegex.test(userName)) {
-      setSnackbarMessage("Username should only contain letters and no spaces or special characters");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-      return false;
+  const handleBlur = (name, value) => {
+    const error = validateField(name, value);
+    setErrors((prev) => ({ ...prev, [name]: error }));
+  };
+
+  const validateAll = () => {
+    const newErrors = {};
+    const fields = { firstName, lastName, userName, email, password, confirmPassword };
+    let valid = true;
+    for (const [name, value] of Object.entries(fields)) {
+      const err = validateField(name, value);
+      if (err) {
+        newErrors[name] = err;
+        valid = false;
+      }
     }
-
-    // Username length validation
-    if (userName.length <= 3) {
-      setSnackbarMessage("Username must be more than 3 characters long");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-      return false;
+    // If image is set, validate type
+    if (image && !["image/jpeg", "image/png", "image/webp"].includes(image.type)) {
+      newErrors.image = "Only JPEG, PNG, or WEBP images are allowed";
+      valid = false;
     }
-
-    // Email validation
-    const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
-    if (!emailRegex.test(email)) {
-      setSnackbarMessage("Please enter a valid email address");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-      return false;
-    }
-
-    // Password validation
-    const specialCharRegex = /[!@#$%^&*(),.?":{}|<>]/;
-    if (password.length < 8 || !specialCharRegex.test(password)) {
-      setSnackbarMessage("Password must be at least 8 characters long and contain at least one special character");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-      return false;
-    }
-
-    // Password match validation
-    if (password !== confirmPassword) {
-      setSnackbarMessage("Passwords do not match");
-      setSnackbarSeverity("error");
-      setOpenSnackbar(true);
-      return false;
-    }
-
-    return true;
+    setErrors(newErrors);
+    return valid;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    // Validate form before submission
-    if (!validateForm()) {
-      return;
-    }
+    if (!validateAll()) return;
 
     setLoading(true);
     try {
       await axiosInstance.post("/otp/send-otp", { email });
       setOtpModalOpen(true);
     } catch (err) {
-      // Handle specific error messages from backend
       const errorMessage = err.response?.data?.message || "Failed to send OTP";
       setSnackbarMessage(errorMessage);
       setSnackbarSeverity("error");
@@ -286,7 +282,7 @@ const SignupDrawer = ({ open, onClose }) => {
       formData.append("lastname", lastName);
       formData.append("username", userName);
       formData.append("email", email);
-      formData.append("image", image);
+      if (image) formData.append("image", image);
       formData.append("password", password);
       formData.append("confirmpassword", confirmPassword);
       
@@ -295,21 +291,15 @@ const SignupDrawer = ({ open, onClose }) => {
       }
 
       const response = await axiosInstance.post("/users/register", formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-
-      console.log('Registration response:', response.data);
 
       setSnackbarMessage(response.data.message);
       setSnackbarSeverity("success");
       setOpenSnackbar(true);
 
       localStorage.setItem("usertoken", response.data.token);
-      setTimeout(() => {
-        router.push("/");
-      }, 2000);
+      setTimeout(() => { router.push("/"); }, 2000);
 
     } catch (err) {
       console.error("Registration error:", err);
@@ -322,12 +312,8 @@ const SignupDrawer = ({ open, onClose }) => {
     }
   };
 
-  const handleCloseSnackbar = () => {
-    setOpenSnackbar(false);
-  };
-
   const handleGoogleSignup = (e) => {
-    e.preventDefault(); // Prevent form submission
+    e.preventDefault();
     window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/users/auth/google`;
   };
 
@@ -352,28 +338,52 @@ const SignupDrawer = ({ open, onClose }) => {
       </Typography>
 
       <StyledForm onSubmit={handleSubmit} noValidate>
-        <AvatarWrapper hasImage={!!image}>
-          <input
-            accept="image/*"
-            style={{ display: 'none' }}
-            id="profile-image"
-            type="file"
-            onChange={(e) => setImage(e.target.files[0])}
-          />
-          <label htmlFor="profile-image">
-            <StyledAvatar
-              src={image ? URL.createObjectURL(image) : ''}
+        {/* Profile Image (Optional) */}
+        <Box sx={{ textAlign: "center" }}>
+          <AvatarWrapper hasImage={!!image}>
+            <input
+              accept="image/*"
+              style={{ display: 'none' }}
+              id="profile-image"
+              type="file"
+              onChange={(e) => {
+                const file = e.target.files[0];
+                if (file) {
+                  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+                    setErrors((prev) => ({ ...prev, image: "Only JPEG, PNG, or WEBP images are allowed" }));
+                  } else {
+                    setErrors((prev) => ({ ...prev, image: "" }));
+                    setImage(file);
+                  }
+                }
+              }}
             />
-          </label>
-        </AvatarWrapper>
+            <label htmlFor="profile-image">
+              <StyledAvatar src={image ? URL.createObjectURL(image) : ''} />
+            </label>
+          </AvatarWrapper>
+          <Typography variant="caption" sx={{ color: "#64748b", mt: 4, display: "block" }}>
+            Profile photo (optional)
+          </Typography>
+          {errors.image && (
+            <Typography variant="caption" sx={{ color: "#ef4444", display: "block", mt: 0.5 }}>
+              {errors.image}
+            </Typography>
+          )}
+        </Box>
 
+        {/* First Name & Last Name */}
         <Grid container spacing={2}>
           <Grid item xs={6}>
             <TextField
               label="First Name"
               fullWidth
+              required
               value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
+              onChange={(e) => handleFieldChange("firstName", e.target.value)}
+              onBlur={(e) => handleBlur("firstName", e.target.value)}
+              error={!!errors.firstName}
+              helperText={errors.firstName}
               sx={textFieldStyle}
             />
           </Grid>
@@ -381,36 +391,55 @@ const SignupDrawer = ({ open, onClose }) => {
             <TextField
               label="Last Name"
               fullWidth
+              required
               value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
+              onChange={(e) => handleFieldChange("lastName", e.target.value)}
+              onBlur={(e) => handleBlur("lastName", e.target.value)}
+              error={!!errors.lastName}
+              helperText={errors.lastName}
               sx={textFieldStyle}
             />
           </Grid>
         </Grid>
 
+        {/* Username */}
         <TextField
           label="Username"
           fullWidth
+          required
           value={userName}
-          onChange={(e) => setUserName(e.target.value)}
+          onChange={(e) => handleFieldChange("userName", e.target.value)}
+          onBlur={(e) => handleBlur("userName", e.target.value)}
+          error={!!errors.userName}
+          helperText={errors.userName || "Letters, numbers, and underscores only"}
           sx={textFieldStyle}
         />
 
+        {/* Email */}
         <TextField
           label="Email"
           type="email"
           fullWidth
+          required
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => handleFieldChange("email", e.target.value)}
+          onBlur={(e) => handleBlur("email", e.target.value)}
+          error={!!errors.email}
+          helperText={errors.email}
           sx={textFieldStyle}
         />
 
+        {/* Password */}
         <TextField
           label="Password"
           type={showPassword ? "text" : "password"}
           fullWidth
+          required
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => handleFieldChange("password", e.target.value)}
+          onBlur={(e) => handleBlur("password", e.target.value)}
+          error={!!errors.password}
+          helperText={errors.password || "Minimum 8 characters"}
           InputProps={{
             endAdornment: (
               <InputAdornment position="end">
@@ -427,12 +456,17 @@ const SignupDrawer = ({ open, onClose }) => {
           sx={textFieldStyle}
         />
 
+        {/* Confirm Password */}
         <TextField
           label="Confirm Password"
           type={showConfirmPassword ? "text" : "password"}
           fullWidth
+          required
           value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
+          onChange={(e) => handleFieldChange("confirmPassword", e.target.value)}
+          onBlur={(e) => handleBlur("confirmPassword", e.target.value)}
+          error={!!errors.confirmPassword}
+          helperText={errors.confirmPassword}
           InputProps={{
             endAdornment: (
               <InputAdornment position="end">
@@ -449,6 +483,7 @@ const SignupDrawer = ({ open, onClose }) => {
           sx={textFieldStyle}
         />
 
+        {/* Referral Code (Optional) */}
         <TextField
           label="Referral Code (Optional)"
           fullWidth
@@ -458,11 +493,7 @@ const SignupDrawer = ({ open, onClose }) => {
           placeholder="Enter referral code if you have one"
         />
 
-        <StyledButton
-          type="submit"
-          disabled={loading}
-          loading={loading}
-        >
+        <StyledButton type="submit" disabled={loading} loading={loading}>
           {loading ? (
             <>
               <CircularProgress size={24} sx={{ color: "white" }} />
@@ -489,11 +520,7 @@ const SignupDrawer = ({ open, onClose }) => {
           or
         </Box>
 
-        <StyledButton
-          type="button"
-          variant="google"
-          onClick={handleGoogleSignup}
-        >
+        <StyledButton type="button" variant="google" onClick={handleGoogleSignup}>
           <GoogleIcon />
           Continue with Google
         </StyledButton>
@@ -503,9 +530,7 @@ const SignupDrawer = ({ open, onClose }) => {
         open={otpModalOpen}
         onClose={(success) => {
           setOtpModalOpen(false);
-          if (success) {
-            handleOtpVerificationSuccess();
-          }
+          if (success) { handleOtpVerificationSuccess(); }
         }}
         email={email}
       />
@@ -519,10 +544,7 @@ const SignupDrawer = ({ open, onClose }) => {
         <Alert
           onClose={() => setOpenSnackbar(false)}
           severity={snackbarSeverity}
-          sx={{
-            width: '100%',
-            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-          }}
+          sx={{ width: '100%', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
         >
           {snackbarMessage}
         </Alert>
@@ -547,16 +569,27 @@ const textFieldStyle = {
       borderColor: '#ff3366',
       borderWidth: '2px',
     },
+    '&.Mui-error fieldset': {
+      borderColor: '#ef4444',
+    },
   },
   '& .MuiInputLabel-root': {
     color: '#64748b',
     '&.Mui-focused': {
       color: '#ff3366',
     },
+    '&.Mui-error': {
+      color: '#ef4444',
+    },
   },
   '& .MuiInputBase-input': {
     padding: '16px',
   },
+  '& .MuiFormHelperText-root': {
+    marginLeft: 0,
+    fontSize: '0.75rem',
+  },
 };
 
 export default SignupDrawer;
+

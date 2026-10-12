@@ -264,44 +264,66 @@ const LoginDrawer = ({ onClose }) => {
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  // Field-level errors
+  const [errors, setErrors] = useState({ email: "", password: "" });
+
+  const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+  const validateField = (name, value) => {
+    switch (name) {
+      case "email":
+        if (!value.trim()) return "Email is required";
+        if (!emailRegex.test(value.trim())) return "Please enter a valid email address";
+        return "";
+      case "password":
+        if (!value) return "Password is required";
+        if (value.length < 8) return "Password must be at least 8 characters";
+        return "";
+      default:
+        return "";
+    }
+  };
+
+  const handleFieldChange = (name, value) => {
+    if (name === "email") setEmail(value);
+    if (name === "password") setPassword(value);
+    setErrors((prev) => ({ ...prev, [name]: "" }));
+  };
+
+  const handleBlur = (name, value) => {
+    setErrors((prev) => ({ ...prev, [name]: validateField(name, value) }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    const emailErr = validateField("email", email);
+    const passwordErr = validateField("password", password);
+    if (emailErr || passwordErr) {
+      setErrors({ email: emailErr, password: passwordErr });
+      return;
+    }
+
     try {
       setLoading(true);
       
-      // Client-side validations
-      if (!email.trim() || !password.trim()) {
-        setSnackbarMessage("Email and password are required");
-        setSnackbarSeverity("error");
-        setOpenSnackbar(true);
-        return;
-      }
-
       const response = await axiosInstance.post("/users/login", {
         email: email.trim(),
         password: password,
-      }
-    )
-      
-      .catch((error) => {
-        // Handle specific error cases
+      }).catch((error) => {
         if (error.response) {
-          // Server responded with error status
           const errorMessage = error.response.data.message || "Invalid credentials";
           setSnackbarMessage(errorMessage);
           setSnackbarSeverity("error");
           setOpenSnackbar(true);
-          throw new Error(errorMessage); // Stop execution here
+          throw new Error(errorMessage);
         }
-        // Network or other errors
         setSnackbarMessage("Connection error. Please try again.");
         setSnackbarSeverity("error");
         setOpenSnackbar(true);
         throw error;
       });
 
-      // Handle successful login
       if (response && response.data) {
         setSnackbarMessage("Login successful!");
         setSnackbarSeverity("success");
@@ -315,21 +337,16 @@ const LoginDrawer = ({ onClose }) => {
       }
 
     } catch (error) {
-      // This will only log to console, not show to user
       console.log("Login failed:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCloseSnackbar = () => {
-    setOpenSnackbar(false);
-  };
-
+  const handleCloseSnackbar = () => setOpenSnackbar(false);
   const togglePasswordVisibility = () => setShowPassword(!showPassword);
 
   const handleGoogleLogin = () => {
-    // window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/users/auth/google`;
     window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/users/auth/google`;
   };
 
@@ -353,7 +370,10 @@ const LoginDrawer = ({ onClose }) => {
               fullWidth
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => handleFieldChange("email", e.target.value)}
+              onBlur={(e) => handleBlur("email", e.target.value)}
+              error={!!errors.email}
+              helperText={errors.email}
             />
           </Grid>
 
@@ -365,7 +385,10 @@ const LoginDrawer = ({ onClose }) => {
               fullWidth
               required
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => handleFieldChange("password", e.target.value)}
+              onBlur={(e) => handleBlur("password", e.target.value)}
+              error={!!errors.password}
+              helperText={errors.password || "Minimum 8 characters"}
               InputProps={{
                 endAdornment: password && (
                   <InputAdornment position="end">
@@ -418,10 +441,7 @@ const LoginDrawer = ({ onClose }) => {
         open={openSnackbar}
         autoHideDuration={3000}
         onClose={handleCloseSnackbar}
-        anchorOrigin={{
-          vertical: "top",
-          horizontal: "center",
-        }}
+        anchorOrigin={{ vertical: "top", horizontal: "center" }}
       >
         <Alert
           onClose={handleCloseSnackbar}

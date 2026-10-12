@@ -38,14 +38,27 @@ export default function Home() {
           "products/get?page=1&limit=12"
         );
         const data = response.data;
-        const transformedProducts = data.products.map((product) => {
-          const variant = product.variants[0];
-          const firstSize = variant.sizes[0];
+        const validProducts = (data?.products || []).filter(
+          (product) =>
+            Array.isArray(product?.variants) &&
+            product.variants.some(
+              (variant) =>
+                variant?.color &&
+                Array.isArray(variant.sizes) &&
+                variant.sizes.length > 0
+            )
+        );
+
+        const transformedProducts = validProducts.map((product) => {
+          const variant = product.variants.find(
+            (v) => v?.color && Array.isArray(v.sizes) && v.sizes.length > 0
+          );
+          const firstSize = variant?.sizes?.[0];
           return {
             id: product._id,
-            image: variant.mainImage,
+            image: variant?.mainImage || "",
             title: product.name,
-            price: firstSize.discountPrice || firstSize.price,
+            price: firstSize?.discountPrice || firstSize?.price || 0,
           };
         });
         setProducts(transformedProducts);

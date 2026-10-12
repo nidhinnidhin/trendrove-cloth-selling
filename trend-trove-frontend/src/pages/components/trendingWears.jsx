@@ -134,19 +134,29 @@ const TrendingWears = () => {
         const response = await fetch(`${API_URL}/products/get?page=1&limit=8`);
         const data = await response.json();
 
-        // Filter products for trending wears category
+        // Filter products for trending wears category and ensure valid color & size variants
         const trendingProducts = (data?.products || []).filter(
-          (product) => product.category?.name === "Trending Wears"
+          (product) =>
+            product.category?.name === "Trending Wears" &&
+            Array.isArray(product?.variants) &&
+            product.variants.some(
+              (variant) =>
+                variant?.color &&
+                Array.isArray(variant.sizes) &&
+                variant.sizes.length > 0
+            )
         );
 
         const transformedProducts = trendingProducts.map((product) => {
-          const variant = product.variants[0];
-          const firstSize = variant.sizes[0];
+          const variant = product.variants.find(
+            (v) => v?.color && Array.isArray(v.sizes) && v.sizes.length > 0
+          );
+          const firstSize = variant?.sizes?.[0];
           return {
             id: product._id,
             name: product.name,
-            price: `₹${firstSize.discountPrice || firstSize.price}`,
-            image: variant.mainImage,
+            price: `₹${firstSize?.discountPrice || firstSize?.price || 0}`,
+            image: variant?.mainImage || "",
           };
         });
         setProducts(transformedProducts);

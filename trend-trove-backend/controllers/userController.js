@@ -29,74 +29,54 @@ const registerUser = asyncHandler(async (req, res) => {
     console.log("Body: ", req.body);
     console.log("File: ", req.file);
 
-    if (!req.file) {
-      return res.status(400).json({ message: "Profile image is required" });
+    if (req.file) {
+      const allowedFileTypes = [
+        "image/jpeg", 
+        "image/png",   
+        "image/gif",   
+        "image/webp",  
+        "image/bmp",   
+        "image/svg+xml"
+      ];
+      
+      if (!allowedFileTypes.includes(req.file.mimetype)) {
+        return res.status(400).json({
+          message: "Invalid file type. Only image files are allowed.",
+        });
+      }
     }
-    const allowedFileTypes = [
-      "image/jpeg", 
-      "image/png",   
-      "image/gif",   
-      "image/webp",  
-      "image/bmp",   
-      "image/svg+xml"
-    ];
-    
-    if (!allowedFileTypes.includes(req.file.mimetype)) {
+
+    const nameRegex = /^[a-zA-Z]+(([',. -][a-zA-Z ])?[a-zA-Z]*)*$/;
+    const usernameRegex = /^[a-zA-Z0-9_]{3,30}$/;
+    const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+    if (!firstname || !nameRegex.test(firstname.trim())) {
       return res.status(400).json({
-        message: "Invalid file type",
+        message: "First name must contain valid alphabetic characters.",
       });
     }
 
-    const textRegex = /^[A-Za-z]+$/;
-
-    if (!textRegex.test(username)) {
+    if (lastname && lastname.trim() && !nameRegex.test(lastname.trim())) {
       return res.status(400).json({
-        message:
-          "Username should only contain letters and no spaces or special characters.",
+        message: "Last name must contain valid alphabetic characters.",
       });
     }
 
-    if (!textRegex.test(firstname)) {
+    if (!username || !usernameRegex.test(username.trim())) {
       return res.status(400).json({
-        message:
-          "Firstname should only contain letters and no spaces or special characters.",
+        message: "Username must be at least 3 characters and can only contain letters, numbers, and underscores.",
       });
     }
 
-    if (!textRegex.test(lastname)) {
+    if (!email || !emailRegex.test(email.trim())) {
       return res.status(400).json({
-        message:
-          "Lastname should only contain letters and no spaces or special characters.",
+        message: "Please provide a valid email address.",
       });
     }
 
-    if (username.length <= 3) {
-      return res
-        .status(400)
-        .json({ message: "Username must be more than 3 characters long." });
-    }
-
-    // if (!validateEmail(email)) {
-    //   return res.status(400).json({ message: "Email must have at least 3 characters before @gmail.com" });
-    // }
-
-    const specialCharRegex = /[!@#$%^&*(),.?":{}|<>]/;
-    if (password.length < 8 || !specialCharRegex.test(password)) {
+    if (!password || password.length < 8) {
       return res.status(400).json({
-        message:
-          "Password must be at least 8 characters long and contain at least one special character.",
-      });
-    }
-
-    const existUser = await User.findOne({
-      $or: [{ email }, { username }],
-    });
-    if (existUser) {
-      return res.status(400).json({
-        message:
-          existUser.email === email
-            ? "Email already exists"
-            : "Username already exists",
+        message: "Password must be at least 8 characters long.",
       });
     }
 
@@ -104,29 +84,45 @@ const registerUser = asyncHandler(async (req, res) => {
       return res.status(400).json({ message: "Passwords do not match" });
     }
 
+    const existUser = await User.findOne({
+      $or: [{ email: email.trim().toLowerCase() }, { username: username.trim() }],
+    });
+    if (existUser) {
+      return res.status(400).json({
+        message:
+          existUser.email.toLowerCase() === email.trim().toLowerCase()
+            ? "Email already exists"
+            : "Username already exists",
+      });
+    }
+
     // Check referral code
     let referringUser = null;
-    if (referralCode) {
-      referringUser = await User.findOne({ referralCode: referralCode.trim() });
+    if (referralCode && referralCode.trim()) {
+      referringUser = await User.findOne({ referralCode: referralCode.trim().toUpperCase() });
       if (!referringUser) {
         return res.status(400).json({ message: "Invalid referral code" });
       }
     }
 
-    // Upload image to cloudinary
-    const result = await cloudinary.uploader.upload(req.file.path);
+    // Upload image to cloudinary if provided
+    let imageUrl = "";
+    if (req.file) {
+      const result = await cloudinary.uploader.upload(req.file.path);
+      imageUrl = result.secure_url;
+    }
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create new user
     const user = new User({
-      firstname,
-      lastname,
-      username,
-      email,
+      firstname: firstname.trim(),
+      lastname: lastname ? lastname.trim() : "",
+      username: username.trim(),
+      email: email.trim().toLowerCase(),
       password: hashedPassword,
-      image: result.secure_url,
+      image: imageUrl,
       referredBy: referringUser ? referringUser._id : null
     });
 

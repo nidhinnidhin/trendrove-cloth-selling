@@ -5,6 +5,21 @@ const SizeVariant = require("../../models/product/sizesVariantModel");
 const asyncHandler = require("express-async-handler");
 const { checkActiveOffers } = require("../../admin/helper/offerHelpers");
 
+const hasColorAndSizeVariants = (product) => {
+  return (
+    product &&
+    Array.isArray(product.variants) &&
+    product.variants.length > 0 &&
+    product.variants.some(
+      (variant) =>
+        variant &&
+        variant.color &&
+        Array.isArray(variant.sizes) &&
+        variant.sizes.length > 0
+    )
+  );
+};
+
 const getAllProducts = asyncHandler(async (req, res) => {
   try {
     const {
@@ -16,7 +31,9 @@ const getAllProducts = asyncHandler(async (req, res) => {
     } = req.query;
     const skip = (page - 1) * limit;
 
-    const query = {};
+    const query = {
+      'variants.0': { $exists: true },
+    };
     
     if (search) {
       query.name = { $regex: search, $options: "i" };
@@ -45,15 +62,22 @@ const getAllProducts = asyncHandler(async (req, res) => {
       })
       .populate("activeOffer");
 
+    // Only include products that have both color variant and size variant
+    const validProducts = products.filter(hasColorAndSizeVariants);
+
     const totalProducts = await Product.countDocuments(query);
 
     // Process products to include availability, variant reviews and ratings
-    const productsWithStatusAndReviews = await Promise.all(products.map(async (product) => {
-      const productObj = product.toObject();
+    const productsWithStatusAndReviews = await Promise.all(validProducts.map(async (product) => {
+      const productObj = product.toObject ? product.toObject() : product;
       
       // Get variant-specific reviews and ratings
       if (productObj.variants && productObj.variants.length > 0) {
-        productObj.variants = await Promise.all(productObj.variants.map(async (variant) => {
+        // Also filter variants to only those with valid sizes
+        const completeVariants = productObj.variants.filter(
+          (v) => v && v.color && Array.isArray(v.sizes) && v.sizes.length > 0
+        );
+        productObj.variants = await Promise.all((completeVariants.length > 0 ? completeVariants : productObj.variants).map(async (variant) => {
           const variantReviews = await Review.find({ variant: variant._id });
           let averageRating = 0;
           
@@ -206,11 +230,11 @@ const searchProducts = asyncHandler(async (req, res) => {
           model: "SizeVariant",
         },
       })
-      .limit(10);
+    const validProducts = products.filter(hasColorAndSizeVariants);
     res.status(200).json({
       success: true,
-      count: products.length,
-      products,
+      count: validProducts.length,
+      products: validProducts,
     });
   } catch (error) {
     console.error("Search error:", error);
@@ -352,11 +376,13 @@ const getProductsByBrand = asyncHandler(async (req, res) => {
         },
       });
 
+    const validProducts = (products || []).filter(hasColorAndSizeVariants);
+
     // Always return 200 status code, even if no products found
     return res.status(200).json({
       success: true,
-      count: products.length,
-      products: products || [] // Ensure we always return an array
+      count: validProducts.length,
+      products: validProducts
     });
 
   } catch (error) {
@@ -394,11 +420,12 @@ const getProductsByCategory = asyncHandler(async (req, res) => {
         },
       });
 
+    const validProducts = products.filter(hasColorAndSizeVariants);
     const totalProducts = await Product.countDocuments(query);
 
     res.status(200).json({
       success: true,
-      products,
+      products: validProducts,
       totalPages: Math.ceil(totalProducts / limit),
       currentPage: parseInt(page),
       totalProducts
@@ -438,11 +465,12 @@ const getProductsByGender = asyncHandler(async (req, res) => {
         },
       });
 
+    const validProducts = products.filter(hasColorAndSizeVariants);
     const totalProducts = await Product.countDocuments(query);
 
     res.status(200).json({
       success: true,
-      products,
+      products: validProducts,
       totalPages: Math.ceil(totalProducts / limit),
       currentPage: parseInt(page),
       totalProducts

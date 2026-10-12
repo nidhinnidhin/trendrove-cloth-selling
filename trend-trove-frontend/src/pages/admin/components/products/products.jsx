@@ -107,13 +107,18 @@ const Product = () => {
       const response = await axios.get(
         `${process.env.NEXT_PUBLIC_API_URL}/variants/variant/get/${productId}`
       );
-      if (response.data.variants) {
+      setVariantsData((prev) => ({
+        ...prev,
+        [productId]: response.data.variants || [],
+      }));
+    } catch (error) {
+      if (error.response?.status === 404) {
         setVariantsData((prev) => ({
           ...prev,
-          [productId]: response.data.variants,
+          [productId]: [],
         }));
+        return;
       }
-    } catch (error) {
       console.error("Error fetching variants:", error);
       setSnackbar({
         open: true,
@@ -130,16 +135,22 @@ const Product = () => {
   const handleSizesFetch = async (variantId) => {
     try {
       const response = await axiosInstance.get(
-        // `${process.env.NEXT_PUBLIC_API_URL}/sizes/sizes/${variantId}`
         `${process.env.NEXT_PUBLIC_API_URL}/sizes/sizes/${variantId}`
       );
       if (response.status === 200) {
         setSizeVariantsData((prev) => ({
           ...prev,
-          [variantId]: response.data.sizeVariants,
+          [variantId]: response.data.sizeVariants || [],
         }));
       }
     } catch (error) {
+      if (error.response?.status === 404) {
+        setSizeVariantsData((prev) => ({
+          ...prev,
+          [variantId]: [],
+        }));
+        return;
+      }
       console.error("Error fetching sizes:", error);
       setSnackbar({
         open: true,
@@ -378,7 +389,11 @@ const Product = () => {
         <Accordion
           key={product._id}
           sx={{ mb: 2, boxShadow: 3 }}
-          onChange={() => handleVariantFetch(product._id)}
+          onChange={(event, isExpanded) => {
+            if (isExpanded) {
+              handleVariantFetch(product._id);
+            }
+          }}
         >
           <AccordionSummary
             expandIcon={<ExpandMore />}
@@ -467,12 +482,23 @@ const Product = () => {
               </Button>
             </Box>
 
+            {/* Empty Variants Message */}
+            {variantsData[product._id] && variantsData[product._id].length === 0 && (
+              <Typography sx={{ color: "#B8BBC2", mb: 2 }}>
+                No variants added yet for this product. Click "Add Variant" to add one.
+              </Typography>
+            )}
+
             {/* Variants Section */}
             {variantsData[product._id]?.map((variant) => (
               <Accordion
                 key={variant._id}
                 sx={{ mb: 1 }}
-                onChange={() => handleSizesFetch(variant._id)}
+                onChange={(event, isExpanded) => {
+                  if (isExpanded) {
+                    handleSizesFetch(variant._id);
+                  }
+                }}
               >
                 <AccordionSummary
                   expandIcon={<ExpandMore />}

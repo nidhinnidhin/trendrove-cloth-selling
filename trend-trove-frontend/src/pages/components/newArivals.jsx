@@ -103,14 +103,29 @@ const NewArrival = () => {
         const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:9090/api";
         const response = await fetch(`${API_URL}/products/get?page=1&limit=12`);
         const data = await response.json();
-        const transformedProducts = (data?.products || []).map((product) => {
-          const variant = product.variants[0];
-          const firstSize = variant.sizes[0];
+        // Only list products that have at least one color variant with size variants added
+        const validProducts = (data?.products || []).filter(
+          (product) =>
+            Array.isArray(product?.variants) &&
+            product.variants.some(
+              (variant) =>
+                variant?.color &&
+                Array.isArray(variant.sizes) &&
+                variant.sizes.length > 0
+            )
+        );
+
+        const transformedProducts = validProducts.map((product) => {
+          // Select the variant that has sizes
+          const variant = product.variants.find(
+            (v) => v?.color && Array.isArray(v.sizes) && v.sizes.length > 0
+          );
+          const firstSize = variant?.sizes?.[0];
           return {
             id: product._id,
             name: product.name,
-            price: `₹${firstSize.discountPrice || firstSize.price}`,
-            image: variant.mainImage,
+            price: `₹${firstSize?.discountPrice || firstSize?.price || 0}`,
+            image: variant?.mainImage || "",
           };
         });
         setProducts(transformedProducts);

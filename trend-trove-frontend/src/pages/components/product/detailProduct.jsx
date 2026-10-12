@@ -151,34 +151,39 @@ const DetailProduct = () => {
           const productData = response.data.product;
           console.log(productData);
 
-          setVariants(productData.variants);
+          // Only show variants that have both color and size variants
+          const availableVariants = (productData.variants || []).filter(
+            (v) => v?.color && Array.isArray(v.sizes) && v.sizes.length > 0
+          );
+          const activeVariants = availableVariants.length > 0 ? availableVariants : (productData.variants || []);
+          setVariants(activeVariants);
 
-          const initialVariant = productData.variants[0];
+          const initialVariant = activeVariants[0] || {};
           setVariantIndex(0);
-          setMainImage(initialVariant.mainImage);
-          setSelectedColor(initialVariant.color);
+          setMainImage(initialVariant?.mainImage || "");
+          setSelectedColor(initialVariant?.color || "");
 
-          const initialSize = initialVariant.sizes[0]?.size || "";
+          const initialSize = initialVariant?.sizes?.[0]?.size || "";
           setSelectedSize(initialSize);
 
           setProduct({
             id: productData._id,
-            image: initialVariant.mainImage,
+            image: initialVariant?.mainImage || "",
             title: productData.name,
             description: productData.description,
-            price: initialVariant.sizes[0]?.price || 0,
-            discountPrice: initialVariant.sizes[0]?.discountPrice || 0,
-            category: productData.category.name,
-            sizes: initialVariant.sizes,
-            colors: initialVariant.color,
+            price: initialVariant?.sizes?.[0]?.price || 0,
+            discountPrice: initialVariant?.sizes?.[0]?.discountPrice || 0,
+            category: productData.category?.name || "",
+            sizes: initialVariant?.sizes || [],
+            colors: initialVariant?.color || "",
             material: productData.material,
             pattern: productData.pattern,
-            brand: productData.brand.name,
-            inStock: initialVariant.sizes[0]?.inStock
+            brand: productData.brand?.name || "",
+            inStock: initialVariant?.sizes?.[0]?.inStock
               ? "Available"
               : "Not Available",
-            stockCount: initialVariant.sizes[0]?.stockCount,
-            subImages: initialVariant.subImages,
+            stockCount: initialVariant?.sizes?.[0]?.stockCount || 0,
+            subImages: initialVariant?.subImages || [],
             gender: productData.gender,
             isDeleted: productData.isDeleted,
           });

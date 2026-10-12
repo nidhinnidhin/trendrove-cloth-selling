@@ -38,8 +38,23 @@ export default function Explore() {
 
         const data = response.data;
         const products = response.data.products;
-        const transformedProducts = data.products.map((product) => {
-          const firstVariant = product.variants?.[0] || {};
+        const validProducts = (data.products || []).filter(
+          (product) =>
+            Array.isArray(product?.variants) &&
+            product.variants.some(
+              (variant) =>
+                variant?.color &&
+                Array.isArray(variant.sizes) &&
+                variant.sizes.length > 0
+            )
+        );
+
+        const transformedProducts = validProducts.map((product) => {
+          // Use only variants that have sizes
+          const validVariants = product.variants.filter(
+            (v) => v?.color && Array.isArray(v.sizes) && v.sizes.length > 0
+          );
+          const firstVariant = validVariants[0] || {};
           let originalPrice = 0;
           let discountedPrice = 0;
           let discountPercentage = 0;
@@ -47,28 +62,27 @@ export default function Explore() {
           let colorImages = [];
           let availableColors = [];
           let availableSizes = [];
-          let rating = 0;
 
-          if (product.variants && product.variants.length > 0) {
-            // Extract all colors and sizes
-            product.variants.forEach((variant) => {
+          if (validVariants.length > 0) {
+            // Extract colors and sizes from complete variants
+            validVariants.forEach((variant) => {
               availableColors.push({
                 color: variant.color,
                 colorImage: variant.colorImage,
               });
-              variant.sizes.forEach((size) => {
+              variant.sizes?.forEach((size) => {
                 availableSizes.push(size.size);
               });
             });
 
             // Get default variant and size
-            const variant = product.variants[0];
-            if (variant.sizes && variant.sizes.length > 0) {
+            const variant = validVariants[0];
+            if (variant?.sizes && variant.sizes.length > 0) {
               const firstSize = variant.sizes[0];
               originalPrice = firstSize.price || 0;
               discountedPrice = firstSize.discountPrice || originalPrice;
 
-              if (product.activeOffer && product.activeOffer._id.isActive) {
+              if (product.activeOffer && product.activeOffer._id?.isActive) {
                 discountPercentage =
                   product.activeOffer._id.discountPercentage || 0;
                 isOfferActive = true;
@@ -83,8 +97,8 @@ export default function Explore() {
 
           return {
             id: product._id,
-            image: product.variants?.[0]?.mainImage || "",
-            subImage: product.variants?.[0]?.subImages[1],
+            image: firstVariant.mainImage || "",
+            subImage: firstVariant.subImages?.[1] || firstVariant.mainImage || "",
             title: product.name || "Unknown Product",
             description: product.description || "",
             reviewCount: firstVariant.reviewCount || 0,
@@ -92,7 +106,7 @@ export default function Explore() {
             price: discountedPrice,
             originalPrice: originalPrice,
             discountPercentage: isOfferActive ? discountPercentage : 0,
-            variantsCount: product.variants?.length || 0,
+            variantsCount: validVariants.length,
             colorImages: colorImages,
             availableSizes: [...new Set(availableSizes)],
             category: product.category?.name || "Uncategorized",

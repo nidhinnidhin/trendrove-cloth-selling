@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true, trim: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: false, default: null },
-  image: { type: String, required: true },
+  image: { type: String, default: "" },
   createdAt: { type: Date, default: Date.now },
   isDeleted: { type: Boolean, default: false },
   referralCode: {

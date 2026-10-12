@@ -71,31 +71,48 @@ const SearchResults = () => {
             productsToTransform = response.data.productsWithRelated || [];
           }
 
-          const transformedProducts = productsToTransform.map((item) => {
+          const validItems = productsToTransform.filter((item) => {
             const product = category || brand ? item : item.product || item;
+            return (
+              Array.isArray(product?.variants) &&
+              product.variants.some(
+                (variant) =>
+                  variant?.color &&
+                  Array.isArray(variant.sizes) &&
+                  variant.sizes.length > 0
+              )
+            );
+          });
+
+          const transformedProducts = validItems.map((item) => {
+            const product = category || brand ? item : item.product || item;
+            const validVariants = product.variants.filter(
+              (v) => v?.color && Array.isArray(v.sizes) && v.sizes.length > 0
+            );
+            const defaultVariant = validVariants[0] || {};
             const availableColors = [];
             const availableSizes = [];
 
-            // Extract all colors and sizes
-            product.variants.forEach((variant) => {
+            // Extract colors and sizes from complete variants
+            validVariants.forEach((variant) => {
               availableColors.push({
                 color: variant.color,
                 colorImage: variant.colorImage,
               });
-              variant.sizes.forEach((size) => {
+              variant.sizes?.forEach((size) => {
                 availableSizes.push(size.size);
               });
             });
 
             return {
               id: product._id,
-              image: product.variants[0]?.mainImage,
+              image: defaultVariant?.mainImage || "",
               title: product.name,
               description: product.description,
               rating: product.ratings || 0,
-              price: product.variants[0]?.sizes[0]?.price || 0,
-              originalPrice: product.variants[0]?.sizes[0]?.price || 0,
-              variantsCount: product.variants.length,
+              price: defaultVariant?.sizes?.[0]?.price || 0,
+              originalPrice: defaultVariant?.sizes?.[0]?.price || 0,
+              variantsCount: validVariants.length,
               category: product.category?.name,
               gender: product.gender,
               colorImages: availableColors,

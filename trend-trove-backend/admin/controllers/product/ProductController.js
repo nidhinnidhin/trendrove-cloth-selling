@@ -1,37 +1,6 @@
 const Product = require("../../../models/product/productModel");
 const asyncHandler = require("express-async-handler");
 
-// const getAllProducts = asyncHandler(async (req, res) => {
-//   try {
-//     const { page = 1, limit = 5 } = req.query;
-//     const skip = (page - 1) * limit;
-
-//     const products = await Product.find({})
-//       .sort({ createdAt: -1 })
-//       .skip(skip)
-//       .limit(parseInt(limit))
-//       .populate("brand", "name")
-//       .populate("category", "name")
-//       .populate({
-//         path: "variants",
-//         populate: {
-//           path: "sizes",
-//           model: "SizeVariant",
-//         },
-//       });
-
-//     const totalProducts = await Product.countDocuments({});
-
-//     res.status(200).json({
-//       products,
-//       totalPages: Math.ceil(totalProducts / limit),
-//       currentPage: parseInt(page),
-//     });
-//   } catch (error) {
-//     res.status(500).json({ message: "Error fetching products", error });
-//   }
-// });
-
 
 const getAllProductsAdmin = asyncHandler(async (req, res) => {
   try {

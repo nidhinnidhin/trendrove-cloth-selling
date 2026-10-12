@@ -9,13 +9,9 @@ const getProductVariants = asyncHandler(async (req, res) => {
 
         const variants = await Variant.find({ product: id });
 
-        if (!variants || variants.length === 0) {
-            return res.status(404).json({ message: "No variants found for this product." });
-        }
-
         res.status(200).json({
             message: "Variants retrieved successfully",
-            variants,
+            variants: variants || [],
         });
     } catch (error) {
         res.status(500).json({ message: "Error fetching variants", error });
