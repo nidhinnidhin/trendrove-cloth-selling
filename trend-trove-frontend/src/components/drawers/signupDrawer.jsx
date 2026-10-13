@@ -231,6 +231,9 @@ const SignupDrawer = ({ open, onClose }) => {
   };
 
   const handleBlur = (name, value) => {
+    if (!value || !value.toString().trim()) {
+      return;
+    }
     const error = validateField(name, value);
     setErrors((prev) => ({ ...prev, [name]: error }));
   };
@@ -260,8 +263,9 @@ const SignupDrawer = ({ open, onClose }) => {
     if (!validateAll()) return;
 
     setLoading(true);
+    setErrors({});
     try {
-      await axiosInstance.post("/otp/send-otp", { email });
+      await axiosInstance.post("/otp/send-otp", { email: email.trim() });
       setOtpModalOpen(true);
     } catch (err) {
       const errorMessage = err.response?.data?.message || "Failed to send OTP";
@@ -276,6 +280,7 @@ const SignupDrawer = ({ open, onClose }) => {
   const handleOtpVerificationSuccess = async () => {
     try {
       setLoading(true);
+      setErrors({});
       
       const formData = new FormData();
       formData.append("firstname", firstName);
@@ -294,12 +299,16 @@ const SignupDrawer = ({ open, onClose }) => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
+      setErrors({});
       setSnackbarMessage(response.data.message);
       setSnackbarSeverity("success");
       setOpenSnackbar(true);
 
       localStorage.setItem("usertoken", response.data.token);
-      setTimeout(() => { router.push("/"); }, 2000);
+      setTimeout(() => { 
+        if (onClose) onClose();
+        router.push("/"); 
+      }, 1000);
 
     } catch (err) {
       console.error("Registration error:", err);
@@ -307,13 +316,16 @@ const SignupDrawer = ({ open, onClose }) => {
       setSnackbarMessage(errorMessage);
       setSnackbarSeverity("error");
       setOpenSnackbar(true);
-    } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleSignup = (e) => {
-    e.preventDefault();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setErrors({});
     window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/users/auth/google`;
   };
 
@@ -411,7 +423,7 @@ const SignupDrawer = ({ open, onClose }) => {
           onChange={(e) => handleFieldChange("userName", e.target.value)}
           onBlur={(e) => handleBlur("userName", e.target.value)}
           error={!!errors.userName}
-          helperText={errors.userName || "Letters, numbers, and underscores only"}
+          helperText={errors.userName}
           sx={textFieldStyle}
         />
 
@@ -439,7 +451,7 @@ const SignupDrawer = ({ open, onClose }) => {
           onChange={(e) => handleFieldChange("password", e.target.value)}
           onBlur={(e) => handleBlur("password", e.target.value)}
           error={!!errors.password}
-          helperText={errors.password || "Minimum 8 characters"}
+          helperText={errors.password}
           InputProps={{
             endAdornment: (
               <InputAdornment position="end">

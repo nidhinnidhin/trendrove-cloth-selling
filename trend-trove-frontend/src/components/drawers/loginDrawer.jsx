@@ -272,12 +272,11 @@ const LoginDrawer = ({ onClose }) => {
   const validateField = (name, value) => {
     switch (name) {
       case "email":
-        if (!value.trim()) return "Email is required";
+        if (!value || !value.trim()) return "Email is required";
         if (!emailRegex.test(value.trim())) return "Please enter a valid email address";
         return "";
       case "password":
         if (!value) return "Password is required";
-        if (value.length < 8) return "Password must be at least 8 characters";
         return "";
       default:
         return "";
@@ -291,11 +290,15 @@ const LoginDrawer = ({ onClose }) => {
   };
 
   const handleBlur = (name, value) => {
+    if (!value || !value.toString().trim()) {
+      return;
+    }
     setErrors((prev) => ({ ...prev, [name]: validateField(name, value) }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setErrors({ email: "", password: "" });
     
     const emailErr = validateField("email", email);
     const passwordErr = validateField("password", password);
@@ -310,35 +313,26 @@ const LoginDrawer = ({ onClose }) => {
       const response = await axiosInstance.post("/users/login", {
         email: email.trim(),
         password: password,
-      }).catch((error) => {
-        if (error.response) {
-          const errorMessage = error.response.data.message || "Invalid credentials";
-          setSnackbarMessage(errorMessage);
-          setSnackbarSeverity("error");
-          setOpenSnackbar(true);
-          throw new Error(errorMessage);
-        }
-        setSnackbarMessage("Connection error. Please try again.");
-        setSnackbarSeverity("error");
-        setOpenSnackbar(true);
-        throw error;
       });
 
       if (response && response.data) {
+        setErrors({ email: "", password: "" });
         setSnackbarMessage("Login successful!");
         setSnackbarSeverity("success");
         setOpenSnackbar(true);
         localStorage.setItem("usertoken", response.data.token);
         
         setTimeout(() => {
-          router.push("/");
           if (onClose) onClose();
-        }, 2000);
+          router.push("/");
+        }, 1000);
       }
-
     } catch (error) {
       console.log("Login failed:", error);
-    } finally {
+      const errorMessage = error?.response?.data?.message || "Invalid credentials";
+      setSnackbarMessage(errorMessage);
+      setSnackbarSeverity("error");
+      setOpenSnackbar(true);
       setLoading(false);
     }
   };
@@ -346,7 +340,12 @@ const LoginDrawer = ({ onClose }) => {
   const handleCloseSnackbar = () => setOpenSnackbar(false);
   const togglePasswordVisibility = () => setShowPassword(!showPassword);
 
-  const handleGoogleLogin = () => {
+  const handleGoogleLogin = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setErrors({ email: "", password: "" });
     window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/users/auth/google`;
   };
 
@@ -388,7 +387,7 @@ const LoginDrawer = ({ onClose }) => {
               onChange={(e) => handleFieldChange("password", e.target.value)}
               onBlur={(e) => handleBlur("password", e.target.value)}
               error={!!errors.password}
-              helperText={errors.password || "Minimum 8 characters"}
+              helperText={errors.password}
               InputProps={{
                 endAdornment: password && (
                   <InputAdornment position="end">
@@ -429,7 +428,7 @@ const LoginDrawer = ({ onClose }) => {
           </Grid>
 
           <Grid item xs={12}>
-            <GoogleButton onClick={handleGoogleLogin}>
+            <GoogleButton type="button" onClick={handleGoogleLogin}>
               <GoogleIcon />
               Continue with Google
             </GoogleButton>
