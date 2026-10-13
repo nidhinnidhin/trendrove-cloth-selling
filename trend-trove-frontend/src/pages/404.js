@@ -31,7 +31,7 @@ export default function Custom404() {
         Oops! You ran out of oxygen.
       </Typography>
       <Typography variant="body1" mb={3}>
-        The page you're looking for is now beyond our reach. Let's get you..
+        The page you&apos;re looking for is now beyond our reach. Let&apos;s get you..
       </Typography>
       <Button variant="contained" color="primary" onClick={() => router.push("/")}>
         Back Home

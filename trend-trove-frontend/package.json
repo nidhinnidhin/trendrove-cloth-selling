@@ -37,7 +37,7 @@
     "jspdf-autotable": "^3.8.4",
     "lucide-react": "^0.475.0",
     "mongoose": "^8.9.5",
-    "next": "15.1.4",
+    "next": "^15.1.12",
     "next-auth": "^4.24.11",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
@@ -62,7 +62,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "eslint": "^9",
-    "eslint-config-next": "15.1.4",
+    "eslint-config-next": "^15.1.12",
     "typescript": "^5.8.2"
   }
 }
