@@ -4,8 +4,8 @@
     "installCommand": "yarn install",
     "framework": "nextjs",
     "env": {
-      "NEXT_PUBLIC_API_URL": "https://api.trendrove.shop/api",
-      "NEXT_PUBLIC_SOCKET_URL": "https://api.trendrove.shop",
-      "BACKEND_API_URL": "https://api.trendrove.shop"
+      "NEXT_PUBLIC_API_URL": "https://trendrove.nidhintech.site/api",
+      "NEXT_PUBLIC_SOCKET_URL": "https://trendrove.nidhintech.site",
+      "BACKEND_API_URL": "https://trendrove.nidhintech.site"
     }
 }

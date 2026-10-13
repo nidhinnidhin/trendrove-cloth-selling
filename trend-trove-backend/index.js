@@ -37,6 +37,10 @@ const server = http.createServer(app);
 
 // Define allowed origins
 const allowedOrigins = [
+  'https://trendrove-shop.nidhintech.site',
+  'https://www.trendrove-shop.nidhintech.site',
+  'https://trendrove.nidhintech.site',
+  'https://trendrove-cloth-selling-nu.vercel.app',
   'https://www.trendrove.shop',
   'https://trendrove.shop',
   'http://localhost:3005',
@@ -46,10 +50,25 @@ const allowedOrigins = [
   'https://trend-trove-frontend-git-master-nidhinbabu171gmailcoms-projects.vercel.app'
 ];
 
+// Helper to check if origin is allowed (supports subdomains for nidhintech.site and vercel.app)
+const isOriginAllowed = (origin) => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (/^https:\/\/([a-zA-Z0-9-]+\.)*nidhintech\.site$/.test(origin)) return true;
+  if (/^https:\/\/([a-zA-Z0-9-]+\.)*vercel\.app$/.test(origin)) return true;
+  return false;
+};
+
 // Configure socket.io
 const io = new Server(server, { 
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('The CORS policy does not allow access from this Origin.'));
+      }
+    },
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -181,13 +200,11 @@ app.use(passport.session());
 
 app.use(cors({
   origin: function(origin, callback) {
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
+    if (isOriginAllowed(origin)) {
+      return callback(null, true);
     }
-    return callback(null, true);
+    const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+    return callback(new Error(msg), false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
