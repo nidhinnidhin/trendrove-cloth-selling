@@ -1,6 +1,24 @@
 const Checkout = require("../../../models/checkout/checkoutModal");
 const Cart = require("../../../models/cart/cartModal");
 const Wallet = require("../../../models/wallet/walletModel");
+
+// Helper: credit wallet for refund
+const creditWallet = async (userId, amount, description) => {
+  let wallet = await Wallet.findOne({ userId });
+  if (!wallet) {
+    wallet = new Wallet({ userId, balance: 0, transactions: [] });
+  }
+  wallet.balance += amount;
+  wallet.transactions.push({
+    userId,
+    type: "credit",
+    amount,
+    description,
+    date: new Date(),
+  });
+  await wallet.save();
+  return wallet;
+};
 const Address = require("../../../models/address/addressModal");
 const Size = require("../../../models/product/sizesVariantModel");
 const asyncHandler = require("express-async-handler");
@@ -49,8 +67,10 @@ const getAllOrders = asyncHandler(async (req, res) => {
         size: item.sizeVariant?.size,
         quantity: item.quantity,
         price: item.price,
+        finalPrice: item.finalPrice || item.price,
         image: item.variant?.mainImage,
         status: item.status,
+        cancellationReason: item.cancellationReason || "",
         returnRequested: item.returnRequested || false,
         returnStatus: item.returnStatus,
         returnReason: item.returnReason,
@@ -58,6 +78,12 @@ const getAllOrders = asyncHandler(async (req, res) => {
       })),
       shippingAddress: order.shipping.address,
       shippingMethod: order.shipping.shippingMethod,
+      deliveryCharge:
+        order.shipping?.deliveryCharge !== undefined
+          ? order.shipping.deliveryCharge
+          : 0,
+      couponCode: order.couponCode || "",
+      discountAmount: order.discountAmount || 0,
       payment: {
         method: order.payment.method,
         status: order.payment.status,
@@ -66,6 +92,7 @@ const getAllOrders = asyncHandler(async (req, res) => {
         date: order.payment.paymentDate,
       },
       orderStatus: order.orderStatus,
+      orderReason: order.reason || "",
       totalAmount: order.totalAmount,
       createdAt: order.createdAt,
     }));
@@ -141,6 +168,24 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       });
     }
 
+    // Do not allow updating status if the item or entire order is already cancelled
+    if (item.status === "Cancelled" || order.orderStatus === "Cancelled") {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Cannot modify status of an order or item that was cancelled by the user",
+      });
+    }
+
+    // Do not allow updating status if the item or entire order is already delivered
+    if (item.status === "Delivered" || order.orderStatus === "Delivered") {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Cannot modify status of an order or item that has already been delivered",
+      });
+    }
+
     // If item is being cancelled, restore product quantities
     if (newStatus === "Cancelled" && item.status !== "Cancelled") {
       const sizeVariant = await Size.findById(item.sizeVariant).session(session);
@@ -156,12 +201,18 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     // Update item status
     item.status = newStatus;
 
-    // Check if all items are cancelled
-    const allCancelled = order.items.every((item) => item.status === "Cancelled");
-    if (allCancelled) {
+    // Check overall order status
+    const activeItems = order.items.filter((i) => i.status !== "Cancelled");
+    if (activeItems.length === 0) {
       order.orderStatus = "Cancelled";
+    } else if (activeItems.every((i) => i.status === "Delivered")) {
+      order.orderStatus = "Delivered";
+    } else if (activeItems.some((i) => i.status === "Shiped")) {
+      order.orderStatus = "Shiped";
+    } else if (activeItems.some((i) => i.status === "Processing")) {
+      order.orderStatus = "Processing";
     } else {
-      order.orderStatus = order.items.some((item) => item.status === "Processing") ? "Processing" : "pending";
+      order.orderStatus = "pending";
     }
 
     await order.save({ session });
@@ -285,6 +336,34 @@ const approveReturn = asyncHandler(async (req, res) => {
           await sizeVariant.save({ session });
         }
       }
+
+      // Save order first, then credit wallet (outside session for wallet ops)
+      await order.save({ session });
+      await session.commitTransaction();
+
+      // Credit wallet refund — item's effective paid price
+      const refundAmount = (item.finalPrice || item.price) * item.quantity;
+      let walletCredited = false;
+      if (refundAmount > 0) {
+        try {
+          await creditWallet(
+            order.user,
+            refundAmount,
+            `Refund for returned item in Order #${order._id}`
+          );
+          walletCredited = true;
+        } catch (walletError) {
+          console.error("Wallet credit failed after return approval:", walletError);
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Return approved. ₹${refundAmount} has been credited to the customer's wallet.`,
+        walletCredited,
+        refundAmount,
+        order,
+      });
     } else {
       order.items[itemIndex].returnStatus = "Return Rejected";
       order.items[itemIndex].returnRequested = false;
@@ -306,17 +385,21 @@ const approveReturn = asyncHandler(async (req, res) => {
         `
       };
 
-      await transporter.sendMail(mailOptions);
+      try {
+        await transporter.sendMail(mailOptions);
+      } catch (mailError) {
+        console.error("Failed to send rejection email:", mailError);
+      }
+
+      await order.save({ session });
+      await session.commitTransaction();
+
+      return res.status(200).json({
+        success: true,
+        message: "Return rejected successfully",
+        order,
+      });
     }
-
-    await order.save({ session });
-    await session.commitTransaction();
-
-    res.status(200).json({
-      success: true,
-      message: `Return ${approved ? "approved" : "rejected"} successfully`,
-      order,
-    });
   } catch (error) {
     await session.abortTransaction();
     console.error(error);

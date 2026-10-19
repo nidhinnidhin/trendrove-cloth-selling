@@ -18,6 +18,11 @@ import {
   Select,
   MenuItem,
   Grid,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  CircularProgress,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
@@ -92,6 +97,9 @@ const Wishlist = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [snackbarSeverity, setSnackbarSeverity] = useState("success");
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     fetchWishlistItems();
@@ -100,29 +108,54 @@ const Wishlist = () => {
   const fetchWishlistItems = async () => {
     try {
       const response = await axiosInstance.get("/user/wishlist/get");
-      setItems(response.data.Wishlist);
+      const wishlistData = response.data.Wishlist || [];
+      setItems(wishlistData);
+      dispatch(setWishlistLength(wishlistData.length));
     } catch (error) {
       console.error("Error fetching wishlist items:", error);
     }
   };
 
-  const handleRemoveFromWishlist = async (item) => {
+  const handleOpenDeleteModal = (item) => {
+    setItemToDelete(item);
+    setDeleteModalOpen(true);
+  };
+
+  const handleCloseDeleteModal = () => {
+    if (isDeleting) return;
+    setDeleteModalOpen(false);
+    setItemToDelete(null);
+  };
+
+  const handleConfirmRemove = async () => {
+    if (!itemToDelete) return;
+    setIsDeleting(true);
     try {
-      await axiosInstance.delete(`/user/wishlist/remove/${item._id}`);
-      
+      await axiosInstance.delete(`/user/wishlist/remove/${itemToDelete._id}`, {
+        data: {
+          productId: itemToDelete.product?._id,
+          variantId: itemToDelete.variant?._id,
+          sizeVariantId: itemToDelete.sizeVariant?._id,
+        },
+      });
+
       const wishlistResponse = await axiosInstance.get("/user/wishlist/get");
-      dispatch(setWishlistLength(wishlistResponse.data.Wishlist.length));
-      
+      const updatedWishlist = wishlistResponse.data.Wishlist || [];
+      setItems(updatedWishlist);
+      dispatch(setWishlistLength(updatedWishlist.length));
+
       setSnackbarMessage("Item removed from wishlist");
       setSnackbarSeverity("success");
       setSnackbarOpen(true);
-      
-      fetchWishlistItems();
     } catch (error) {
       console.error("Error removing from wishlist:", error);
-      setSnackbarMessage("Failed to remove item");
+      setSnackbarMessage(error.response?.data?.message || "Failed to remove item");
       setSnackbarSeverity("error");
       setSnackbarOpen(true);
+    } finally {
+      setIsDeleting(false);
+      setDeleteModalOpen(false);
+      setItemToDelete(null);
     }
   };
 
@@ -217,18 +250,40 @@ const Wishlist = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Typography variant="h6">
-                      ₹{item.sizeVariant.discountPrice}
+                    <Typography variant="h6" sx={{ fontWeight: 600, color: '#1a1a1a' }}>
+                      ₹{item.sizeVariant?.discountPrice ?? item.sizeVariant?.price}
                     </Typography>
-                    {item.sizeVariant.price !== item.sizeVariant.discountPrice && (
-                      <Typography
-                        variant="body2"
-                        color="textSecondary"
-                        sx={{ textDecoration: 'line-through' }}
-                      >
-                        ₹{item.sizeVariant.price}
-                      </Typography>
-                    )}
+                    {item.sizeVariant?.discountPrice &&
+                      item.sizeVariant?.price &&
+                      Number(item.sizeVariant.discountPrice) < Number(item.sizeVariant.price) && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                          <Typography
+                            variant="body2"
+                            color="textSecondary"
+                            sx={{ textDecoration: 'line-through' }}
+                          >
+                            ₹{item.sizeVariant.price}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: '#2e7d32',
+                              fontWeight: 700,
+                              bgcolor: '#e8f5e9',
+                              px: 0.8,
+                              py: 0.2,
+                              borderRadius: '4px',
+                            }}
+                          >
+                            {Math.round(
+                              ((item.sizeVariant.price - item.sizeVariant.discountPrice) /
+                                item.sizeVariant.price) *
+                                100
+                            )}
+                            % OFF
+                          </Typography>
+                        </Box>
+                      )}
                   </TableCell>
                   <TableCell>
                     <Grid container spacing={1} direction="column">
@@ -245,7 +300,7 @@ const Wishlist = () => {
                       <Grid item>
                         <ActionButton
                           startIcon={<DeleteIcon />}
-                          onClick={() => handleRemoveFromWishlist(item)}
+                          onClick={() => handleOpenDeleteModal(item)}
                           fullWidth
                         >
                           Remove
@@ -259,6 +314,110 @@ const Wishlist = () => {
           </Table>
         </StyledTableContainer>
       )}
+
+      {/* Confirmation Modal */}
+      <Dialog
+        open={deleteModalOpen}
+        onClose={handleCloseDeleteModal}
+        PaperProps={{
+          sx: {
+            borderRadius: '16px',
+            p: 1.5,
+            maxWidth: '420px',
+            width: '100%',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
+          },
+        }}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pb: 1 }}>
+          <Box
+            sx={{
+              width: 44,
+              height: 44,
+              borderRadius: '50%',
+              bgcolor: '#fce4ec',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#c2185b',
+            }}
+          >
+            <DeleteIcon />
+          </Box>
+          <Typography variant="h6" sx={{ fontWeight: 600, color: '#333' }}>
+            Remove from Wishlist?
+          </Typography>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 1 }}>
+          <Typography variant="body2" color="textSecondary">
+            Are you sure you want to remove{" "}
+            <strong>{itemToDelete?.product?.name || "this item"}</strong> from your wishlist?
+          </Typography>
+          {itemToDelete && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                p: 1.5,
+                bgcolor: '#fafafa',
+                borderRadius: '8px',
+                border: '1px solid #eee',
+                mt: 2,
+              }}
+            >
+              {itemToDelete.variant?.mainImage && (
+                <img
+                  src={itemToDelete.variant.mainImage}
+                  alt={itemToDelete.product?.name || "Product"}
+                  style={{ width: 50, height: 50, objectFit: 'contain', borderRadius: 6 }}
+                />
+              )}
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  {itemToDelete.product?.name}
+                </Typography>
+                <Typography variant="caption" color="textSecondary" display="block">
+                  Size: {itemToDelete.sizeVariant?.size} | Color: {itemToDelete.variant?.color}
+                </Typography>
+                <Typography variant="caption" sx={{ fontWeight: 600, color: '#c2185b' }}>
+                  ₹{itemToDelete.sizeVariant?.discountPrice ?? itemToDelete.sizeVariant?.price}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2, pt: 1, gap: 1 }}>
+          <Button
+            onClick={handleCloseDeleteModal}
+            disabled={isDeleting}
+            variant="outlined"
+            sx={{
+              borderRadius: '8px',
+              textTransform: 'none',
+              color: '#666',
+              borderColor: '#ccc',
+              '&:hover': { borderColor: '#999', bgcolor: '#f5f5f5' },
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmRemove}
+            disabled={isDeleting}
+            variant="contained"
+            sx={{
+              borderRadius: '8px',
+              textTransform: 'none',
+              bgcolor: '#c2185b',
+              color: '#fff',
+              '&:hover': { bgcolor: '#ad1457' },
+            }}
+          >
+            {isDeleting ? <CircularProgress size={20} color="inherit" /> : "Remove"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snackbarOpen}

@@ -42,6 +42,7 @@ import {
   ShoppingBag,
   Replay,
   ExpandMore,
+  AccountBalanceWallet,
 } from "@mui/icons-material";
 import {
   Document,
@@ -261,18 +262,21 @@ const InvoicePDF = ({ order }) => {
     return null;
   }
   
-  // Calculate subtotal for active items only
+  // Calculate subtotal for active items only using effective discounted price
   const activeSubtotal = activeItems.reduce((total, item) => 
-    total + (item.price * item.quantity), 0
+    total + ((item.finalPrice || item.price) * item.quantity), 0
   );
   
-  // Calculate proportional delivery charge and discount
-  const proportionFactor = activeSubtotal / order.subTotal;
-  const activeDeliveryCharge = Math.round(order.deliveryCharge * proportionFactor);
-  const activeCouponDiscount = Math.round(order.couponDiscount * proportionFactor);
+  const couponDiscount = Number(order.couponDiscount || order.discountAmount || 0);
+  const deliveryCharge = Number(order.deliveryCharge || 0);
+  const totalItemsCount = order.items.length;
+  const isPartialReturn = activeItems.length < totalItemsCount;
+  const proportionFactor = isPartialReturn && (order.subTotal || activeSubtotal) > 0 ? activeSubtotal / (order.subTotal || activeSubtotal) : 1;
+  const activeDeliveryCharge = isPartialReturn ? Math.round(deliveryCharge * proportionFactor) : deliveryCharge;
+  const activeCouponDiscount = isPartialReturn ? Math.round(couponDiscount * proportionFactor) : couponDiscount;
   
   // Calculate final amount
-  const finalAmount = activeSubtotal + activeDeliveryCharge - activeCouponDiscount;
+  const finalAmount = Math.max(0, activeSubtotal - activeCouponDiscount) + activeDeliveryCharge;
   return (
     <Document>
       <Page size="A4" style={styles.page}>
@@ -358,7 +362,8 @@ const InvoicePDF = ({ order }) => {
             </View>
 
             {activeItems.map((item, index) => {
-              const itemTotal = item.price * item.quantity;
+              const unitPrice = item.finalPrice || item.price;
+              const itemTotal = unitPrice * item.quantity;
               const taxRate = 0.18; // 18% GST
               const taxAmount = (itemTotal * taxRate) / (1 + taxRate); // Reverse calculate tax
               const priceExclTax = itemTotal - taxAmount;
@@ -374,7 +379,7 @@ const InvoicePDF = ({ order }) => {
                       {`HSN: 6203`}
                     </Text>
                   </View>
-                  <Text style={styles.col2}>₹{item.price.toFixed(2)}</Text>
+                  <Text style={styles.col2}>₹{unitPrice.toFixed(2)}</Text>
                   <Text style={styles.col3}>{item.quantity}</Text>
                   <Text style={styles.col4}>₹{taxAmount.toFixed(2)}</Text>
                   <Text style={styles.col5}>₹{itemTotal.toFixed(2)}</Text>
@@ -759,10 +764,10 @@ const OrdersPage = () => {
     );
   };
 
-  // Calculate total amount for an order
+  // Calculate total amount for an order (using effective final price)
   const calculateOrderTotal = (order) => {
     return order.items.reduce((total, item) => {
-      return total + item.price * item.quantity;
+      return total + (item.finalPrice || item.price) * item.quantity;
     }, 0);
   };
 
@@ -931,13 +936,22 @@ const OrdersPage = () => {
                                 Color: {item.color}
                               </Typography>
                               <Typography variant="body2">
-                                Price: ₹{item.price} × {item.quantity}
+                                Unit Price: ₹{item.finalPrice || item.price}
+                                {item.price && item.finalPrice && item.finalPrice < item.price && (
+                                  <Typography
+                                    component="span"
+                                    variant="caption"
+                                    sx={{ textDecoration: "line-through", color: "text.secondary", ml: 0.5 }}
+                                  >
+                                    ₹{item.price}
+                                  </Typography>
+                                )}
                               </Typography>
                               <Typography
                                 variant="body2"
                                 sx={{ fontWeight: 600 }}
                               >
-                                Item Total: ₹{item.price * item.quantity}
+                                Item Total: ₹{(item.finalPrice || item.price) * item.quantity}
                               </Typography>
                             </Box>
                           </Box>
@@ -982,52 +996,75 @@ const OrdersPage = () => {
                               gap: 0.5,
                             }}
                           >
-                            <Typography variant="subtitle2">
-                              <Payment
-                                sx={{
-                                  fontSize: 16,
-                                  mr: 0.5,
-                                  verticalAlign: "text-bottom",
-                                }}
-                              />
-                              {order.payment?.method || "N/A"}
+                            <Typography variant="subtitle2" sx={{ display: "flex", alignItems: "center" }}>
+                              {order.payment?.method === "wallet" ? (
+                                <AccountBalanceWallet
+                                  sx={{
+                                    fontSize: 16,
+                                    mr: 0.5,
+                                    color: "#f59e0b",
+                                  }}
+                                />
+                              ) : (
+                                <Payment
+                                  sx={{
+                                    fontSize: 16,
+                                    mr: 0.5,
+                                    verticalAlign: "text-bottom",
+                                  }}
+                                />
+                              )}
+                              {order.payment?.method === "wallet"
+                                ? "Wallet Payment"
+                                : order.payment?.method === "cod"
+                                ? "Cash on Delivery"
+                                : order.payment?.method === "online"
+                                ? "Online Payment"
+                                : order.payment?.method || "N/A"}
                             </Typography>
                             <Divider sx={{ my: 1 }} />
                             <Stack direction="row" spacing={1}>
-                              {order.payment?.status === "pending" && (
+                              {order.payment?.method === "wallet" && order.payment?.status === "completed" ? (
                                 <Chip
-                                  label={order.payment?.status}
-                                  color="primary"
-                                  variant="contained"
-                                />
-                              )}
-                              {order.payment?.status === "completed" && (
-                                <Chip
-                                  label={order.payment?.status}
+                                  label="Paid via Wallet"
                                   color="success"
                                   variant="contained"
+                                  sx={{ fontWeight: 600 }}
                                 />
-                              )}
-                              {order.payment?.status === "retry_pending" && (
+                              ) : order.payment?.status === "completed" ? (
                                 <Chip
-                                  label={order.payment?.status}
+                                  label="Paid"
+                                  color="success"
+                                  variant="contained"
+                                  sx={{ fontWeight: 600 }}
+                                />
+                              ) : order.payment?.status === "pending" ? (
+                                <Chip
+                                  label={order.payment?.method === "cod" ? "Pay on Delivery" : "Payment Pending"}
+                                  color={order.payment?.method === "cod" ? "default" : "primary"}
+                                  variant="contained"
+                                />
+                              ) : order.payment?.status === "retry_pending" ? (
+                                <Chip
+                                  label="Payment Pending"
                                   color="error"
                                   variant="contained"
+                                />
+                              ) : (
+                                <Chip
+                                  label={order.payment?.status || "Pending"}
+                                  color="default"
                                 />
                               )}
                             </Stack>
                             <Box sx={{ mt: 1 }}>
                               <Typography variant="body2" color="textSecondary">
-                                Subtotal: ₹{item.price * item.quantity}
+                                Subtotal: ₹{(item.finalPrice || item.price) * item.quantity}
                               </Typography>
 
                               {order.couponCode && (
-                                <Typography variant="body2" color="error">
-                                  Coupon ({order.couponCode}): -₹
-                                  {(
-                                    item.price * item.quantity -
-                                    (order.payment?.amount || 0)
-                                  ).toFixed(1)}
+                                <Typography variant="body2" color="success.main">
+                                  Coupon ({order.couponCode}) applied
                                 </Typography>
                               )}
                               {order.deliveryCharge > 0 && (

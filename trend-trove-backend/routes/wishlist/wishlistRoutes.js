@@ -4,8 +4,9 @@ const { addToWishlist, getWishlist, deleteProductFromWhishlist } = require('../.
 const authMiddleware = require('../../middleware/authMiddleware');
 
 
-router.post('/add',authMiddleware, addToWishlist);
-router.get('/get',authMiddleware, getWishlist);
-router.delete('/remove/wishlist', authMiddleware, deleteProductFromWhishlist)
+router.post('/add', authMiddleware, addToWishlist);
+router.get('/get', authMiddleware, getWishlist);
+router.delete('/remove/:itemId', authMiddleware, deleteProductFromWhishlist);
+router.delete('/remove', authMiddleware, deleteProductFromWhishlist);
 
 module.exports = router;

@@ -78,7 +78,7 @@ const getWishlist = asyncHandler(async (req, res) => {
       .populate({
         path: "items.product",
         select:
-          "name description category brand material pattern ratings gender",
+          "name description category brand material pattern ratings gender activeOffer discountedPrice",
       })
       .populate({
         path: "items.variant",
@@ -88,7 +88,7 @@ const getWishlist = asyncHandler(async (req, res) => {
       .populate({
         path: "items.sizeVariant",
         model: "SizeVariant",
-        select: "size price stockCount",
+        select: "size price discountPrice stockCount",
       });
 
     if (!wishlist || wishlist.items.length === 0) {
@@ -98,9 +98,26 @@ const getWishlist = asyncHandler(async (req, res) => {
       });
     }
 
+    const validItems = wishlist.items.filter(
+      (item) => item.product && item.variant && item.sizeVariant
+    );
+
+    const formattedWishlist = validItems.map((item) => {
+      const itemObj = item.toObject ? item.toObject() : item;
+      if (itemObj.sizeVariant) {
+        if (
+          itemObj.sizeVariant.discountPrice === undefined ||
+          itemObj.sizeVariant.discountPrice === null
+        ) {
+          itemObj.sizeVariant.discountPrice = itemObj.sizeVariant.price;
+        }
+      }
+      return itemObj;
+    });
+
     res.status(200).json({
       message: "Wishlist retrieved successfully",
-      Wishlist: wishlist.items,
+      Wishlist: formattedWishlist,
     });
   } catch (error) {
     console.error("Error fetching Wishlist:", error);
@@ -109,15 +126,14 @@ const getWishlist = asyncHandler(async (req, res) => {
 });
 
 const deleteProductFromWhishlist = asyncHandler(async (req, res) => {
-  console.log("Hitetedd");
+  const itemId = req.params.itemId || req.body?.itemId || req.query?.itemId;
+  const productId = req.body?.productId || req.query?.productId;
+  const variantId = req.body?.variantId || req.query?.variantId;
+  const sizeVariantId = req.body?.sizeVariantId || req.query?.sizeVariantId;
 
-  console.log("Userrrrrr", req.user.id);
-
-  const { productId, variantId, sizeVariantId } = req.body;
-
-  if (!productId || !variantId || !sizeVariantId) {
+  if (!itemId && (!productId || !variantId || !sizeVariantId)) {
     return res.status(400).json({
-      message: "Product ID, Variant ID, and Size Variant ID are required",
+      message: "Item ID or product details are required",
     });
   }
 
@@ -128,19 +144,29 @@ const deleteProductFromWhishlist = asyncHandler(async (req, res) => {
       return res.status(404).json({ message: "Wishlist not found" });
     }
 
-    const itemIndex = wishlist.items.findIndex(
-      (item) =>
-        item.product.toString() === productId &&
-        item.variant.toString() === variantId &&
-        item.sizeVariant.toString() === sizeVariantId
-    );
+    let itemIndex = -1;
+
+    if (itemId) {
+      itemIndex = wishlist.items.findIndex(
+        (item) => item._id && item._id.toString() === itemId.toString()
+      );
+    } else {
+      itemIndex = wishlist.items.findIndex(
+        (item) =>
+          item.product &&
+          item.product.toString() === productId.toString() &&
+          item.variant &&
+          item.variant.toString() === variantId.toString() &&
+          item.sizeVariant &&
+          item.sizeVariant.toString() === sizeVariantId.toString()
+      );
+    }
 
     if (itemIndex === -1) {
       return res.status(404).json({ message: "Product not found in wishlist" });
     }
 
     wishlist.items.splice(itemIndex, 1);
-
     wishlist.totalItems = wishlist.items.length;
 
     await wishlist.save();
@@ -150,7 +176,7 @@ const deleteProductFromWhishlist = asyncHandler(async (req, res) => {
       wishlist,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error removing product from wishlist:", error);
     res.status(500).json({
       message: "Error removing product from wishlist",
       error: error.message,

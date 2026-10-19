@@ -19,30 +19,19 @@ const getWalletDetails = async (req, res) => {
       });
     }
 
-    // Ensure transactions exist before sorting
+    // Sort transactions newest first
     const sortedTransactions = wallet.transactions?.length
-      ? wallet.transactions.sort((a, b) => new Date(b.date) - new Date(a.date))
+      ? [...wallet.transactions].sort((a, b) => new Date(b.date) - new Date(a.date))
       : [];
-
-    // Calculate the correct balance (sum of credited transactions)
-    const totalBalance = sortedTransactions.reduce((sum, t) => {
-      return sum + (t.amount > 0 ? t.amount : 0);
-    }, 0);
 
     // Calculate referral earnings
     const referralEarnings = sortedTransactions
       .filter(t => t.description.toLowerCase().includes('referral'))
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    // Update balance in DB (if not already updated)
-    if (wallet.balance !== totalBalance) {
-      wallet.balance = totalBalance;
-      await wallet.save();
-    }
+      .reduce((sum, t) => sum + (t.type === 'credit' ? t.amount : 0), 0);
 
     res.status(200).json({
       success: true,
-      balance: totalBalance,
+      balance: wallet.balance,
       transactions: sortedTransactions,
       referralEarnings
     });
@@ -56,8 +45,7 @@ const getWalletDetails = async (req, res) => {
   }
 };
 
-
-// Add transaction
+// Add transaction (credit or debit)
 const addTransaction = async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
@@ -67,10 +55,16 @@ const addTransaction = async (req, res) => {
       });
     }
     const { amount, type, description } = req.body;
-    
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid amount' });
+    }
+    if (!['credit', 'debit'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'Invalid transaction type' });
+    }
+
     let wallet = await Wallet.findOne({ userId: req.user.id });
-    
-    console.log("wallettttttt",wallet)
+
     if (!wallet) {
       wallet = await Wallet.create({
         userId: req.user.id,
@@ -85,7 +79,7 @@ const addTransaction = async (req, res) => {
       if (wallet.balance < amount) {
         return res.status(400).json({
           success: false,
-          message: 'Insufficient balance'
+          message: 'Insufficient wallet balance'
         });
       }
       wallet.balance -= amount;
@@ -116,7 +110,31 @@ const addTransaction = async (req, res) => {
   }
 };
 
+// Internal helper: credit wallet for refund (called from checkout controller)
+const creditWalletRefund = async (userId, amount, description) => {
+  try {
+    let wallet = await Wallet.findOne({ userId });
+    if (!wallet) {
+      wallet = new Wallet({ userId, balance: 0, transactions: [] });
+    }
+    wallet.balance += amount;
+    wallet.transactions.push({
+      userId,
+      type: 'credit',
+      amount,
+      description,
+      date: new Date()
+    });
+    await wallet.save();
+    return wallet;
+  } catch (error) {
+    console.error('Error crediting wallet refund:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   getWalletDetails,
-  addTransaction
+  addTransaction,
+  creditWalletRefund
 };

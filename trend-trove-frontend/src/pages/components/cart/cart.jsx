@@ -64,6 +64,7 @@ import {
   getDeliveryCharge,
   getUserLocation,
   deliveryCharges,
+  getEstimatedDeliveryDate,
 } from "@/utils/deliveryCharges";
 import LocationConsentBanner from "@/utils/locationConcentBanner";
 
@@ -403,19 +404,24 @@ function Cart() {
   };
 
   const handleQuantityChange = async (item, newQuantity) => {
-    console.log("StockCounttttttttttttt", item.sizeVariant.stockCount);
-
+    const stockAvailable = item.sizeVariant?.stockCount !== undefined ? item.sizeVariant.stockCount : 1;
     setQuantityError("");
 
-    if (newQuantity > 4 || newQuantity > item.sizeVariant.stockCount) {
-      setQuantityError(
-        `Maximum quantity allowed is ${item.sizeVariant.stockCount} items per product only ${item.sizeVariant.stockCount} available`
+    if (newQuantity > stockAvailable) {
+      setSnackbarMessage(
+        `Only ${stockAvailable} item(s) available in stock for ${item.product.name}`
       );
+      setSnackbarSeverity("error");
+      setSnackbarOpen(true);
       return;
     }
 
+
+
     if (newQuantity < 1) {
-      setQuantityError("Minimum quantity allowed is 1 item");
+      setSnackbarMessage("Minimum quantity allowed is 1 item");
+      setSnackbarSeverity("error");
+      setSnackbarOpen(true);
       return;
     }
     const { product, variant, sizeVariant } = item;
@@ -442,10 +448,15 @@ function Cart() {
       });
 
       const cartResponse = await axiosInstance.get("/cart/get-cart");
-
-      dispatch(setCartLength(cartResponse.data.cart.items.length));
+      if (cartResponse.data.cart) {
+        setCart(cartResponse.data.cart);
+        dispatch(setCartLength(cartResponse.data.cart.items?.length || 0));
+      }
     } catch (error) {
       console.error("Error updating quantity:", error);
+      setSnackbarMessage(error.response?.data?.message || "Failed to update quantity");
+      setSnackbarSeverity("error");
+      setSnackbarOpen(true);
     }
   };
 
@@ -576,28 +587,63 @@ function Cart() {
 
   const calculateTotals = (items) => {
     if (!items || !Array.isArray(items)) {
-      return { totalPrice: 0, discountAmount: 0, finalTotal: 0 };
+      return {
+        totalPrice: 0,
+        mrpTotal: 0,
+        discountAmount: 0,
+        productDiscount: 0,
+        finalTotal: 0,
+        subTotal: 0,
+        deliveryCharge: 0,
+        grandTotal: 0,
+      };
     }
 
     const itemTotals = items.reduce(
       (acc, item) => {
-        const discountedTotal = item.sizeVariant.discountPrice * item.quantity;
-        const regularTotal = item.sizeVariant.price * item.quantity;
-        const itemDiscount = regularTotal - discountedTotal;
+        if (!item.sizeVariant) return acc;
+        const regularPrice = Number(item.sizeVariant.price || 0);
+        const discountPrice =
+          item.sizeVariant.discountPrice !== undefined &&
+          item.sizeVariant.discountPrice !== null
+            ? Number(item.sizeVariant.discountPrice)
+            : regularPrice;
+        const qty = Number(item.quantity || 1);
+
+        const regularTotal = regularPrice * qty;
+        const discountedTotal = discountPrice * qty;
+        const itemDiscount = Math.max(0, regularTotal - discountedTotal);
 
         return {
           totalPrice: acc.totalPrice + regularTotal,
+          mrpTotal: acc.mrpTotal + regularTotal,
           discountAmount: acc.discountAmount + itemDiscount,
+          productDiscount: acc.productDiscount + itemDiscount,
           finalTotal: acc.finalTotal + discountedTotal,
+          subTotal: acc.subTotal + discountedTotal,
         };
       },
-      { totalPrice: 0, discountAmount: 0, finalTotal: 0 }
+      {
+        totalPrice: 0,
+        mrpTotal: 0,
+        discountAmount: 0,
+        productDiscount: 0,
+        finalTotal: 0,
+        subTotal: 0,
+      }
     );
+
+    const charge =
+      deliveryChargeInfo.charge !== null && deliveryChargeInfo.charge !== undefined
+        ? deliveryChargeInfo.charge
+        : itemTotals.finalTotal >= 5000
+        ? 0
+        : (deliveryCharges.DEFAULT || 100);
 
     return {
       ...itemTotals,
-      deliveryCharge: deliveryChargeInfo.charge || 0,
-      grandTotal: itemTotals.finalTotal + (deliveryChargeInfo.charge || 0),
+      deliveryCharge: charge,
+      grandTotal: itemTotals.finalTotal + charge,
     };
   };
 
@@ -636,15 +682,20 @@ function Cart() {
     }
 
     const totals = calculateTotals(cart.items);
-    const shippingCost = totals.finalTotal > 5000 ? 0 : 40;
+    const deliveryCharge =
+      deliveryChargeInfo.charge !== null && deliveryChargeInfo.charge !== undefined
+        ? deliveryChargeInfo.charge
+        : totals.deliveryCharge;
 
     const checkoutData = {
       cartId: cart._id,
       cartItems: cart.items,
-      totalPrice: totals.finalTotal,
-      finalTotal: totals.finalTotal + shippingCost,
-      deliveryCharge: deliveryChargeInfo.charge,
-      discountAmount: totals.discountAmount,
+      mrpTotal: totals.mrpTotal,
+      productDiscount: totals.productDiscount,
+      totalPrice: totals.finalTotal, // Exact items subtotal after product/category discounts
+      deliveryCharge: deliveryCharge,
+      finalTotal: totals.finalTotal + deliveryCharge,
+      discountAmount: totals.productDiscount,
       selectedAddress: selectedAddress,
     };
 
@@ -719,7 +770,7 @@ function Cart() {
                               display="block"
                               color="textSecondary"
                             >
-                              Max 4 items per product
+                              Based on stock availability
                             </Typography>
                           </TableCell>
                           <TableCell>Price</TableCell>
@@ -818,38 +869,73 @@ function Cart() {
                                     </Typography>
                                   </Grid>
                                 </Grid>
+                              </TableCell>                              <TableCell>
+                                {(() => {
+                                  const stockAvailable =
+                                    item.sizeVariant?.stockCount !== undefined
+                                      ? item.sizeVariant.stockCount
+                                      : 1;
+                                  const maxAllowed = Math.max(0, stockAvailable);
+
+                                  if (stockAvailable <= 0) {
+                                    return (
+                                      <Typography
+                                        variant="caption"
+                                        sx={{ color: "error.main", fontWeight: 600 }}
+                                      >
+                                        Out of Stock
+                                      </Typography>
+                                    );
+                                  }
+
+                                  return (
+                                    <FormControl
+                                      variant="outlined"
+                                      sx={{ width: "90px" }}
+                                      size="small"
+                                    >
+                                      <StyledSelect
+                                        value={
+                                          item.quantity > maxAllowed && maxAllowed > 0
+                                            ? maxAllowed
+                                            : item.quantity
+                                        }
+                                        onChange={(e) =>
+                                          handleQuantityChange(item, Number(e.target.value))
+                                        }
+                                        disabled={item.product.isDeleted || maxAllowed <= 0}
+                                      >
+                                        {Array.from({ length: maxAllowed }, (_, i) => i + 1).map((num) => (
+                                          <MenuItem key={num} value={num}>
+                                            {num}
+                                          </MenuItem>
+                                        ))}
+                                      </StyledSelect>
+                                    </FormControl>
+                                  );
+                                })()}
                               </TableCell>
                               <TableCell>
-                                <FormControl
-                                  variant="outlined"
-                                  sx={{ width: "100px" }}
-                                  size="small"
-                                >
-                                  <StyledSelect
-                                    value={item.quantity}
-                                    onChange={(e) =>
-                                      handleQuantityChange(item, e.target.value)
-                                    }
-                                    error={item.quantity > 4}
-                                    disabled={item.product.isDeleted} // Disable quantity selection for unavailable products
-                                  >
-                                    {[1, 2, 3, 4].map((num) => (
-                                      <MenuItem key={num} value={num}>
-                                        {num}
-                                      </MenuItem>
-                                    ))}
-                                  </StyledSelect>
-                                </FormControl>
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="body1">{`₹${
-                                  item.sizeVariant.discountPrice * item.quantity
-                                }`}</Typography>
+                                <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                                  ₹{(item.sizeVariant?.discountPrice !== undefined && item.sizeVariant.discountPrice !== null ? item.sizeVariant.discountPrice : item.sizeVariant?.price) * item.quantity}
+                                </Typography>
+                                {item.sizeVariant?.discountPrice !== undefined &&
+                                  item.sizeVariant.discountPrice !== null &&
+                                  item.sizeVariant.discountPrice < item.sizeVariant.price && (
+                                    <Typography
+                                      variant="body2"
+                                      color="textSecondary"
+                                      sx={{ textDecoration: "line-through", fontSize: "0.8rem" }}
+                                    >
+                                      ₹{item.sizeVariant.price * item.quantity}
+                                    </Typography>
+                                )}
                                 <Typography
-                                  variant="body2"
+                                  variant="caption"
                                   color="textSecondary"
+                                  display="block"
                                 >
-                                  {`₹${item.sizeVariant.discountPrice} each`}
+                                  ₹{item.sizeVariant?.discountPrice !== undefined && item.sizeVariant.discountPrice !== null ? item.sizeVariant.discountPrice : item.sizeVariant?.price} each
                                 </Typography>
                               </TableCell>
                               <TableCell align="right">
@@ -928,97 +1014,180 @@ function Cart() {
               </Grid>
 
               <Grid item xs={12} md={3}>
-                <Paper elevation={3} sx={{ p: 2, mb: 2 }}>
-                  <Typography variant="h6" gutterBottom>
-                    Delivery Information
+                <Paper elevation={3} sx={{ p: 2.5, mb: 2, borderRadius: 2 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, mb: 2, color: "#1a1a1a" }}>
+                    Price & Delivery Details
                   </Typography>
 
-                  {/* <Button
-                    fullWidth
-                    variant="outlined"
-                    onClick={handleGetLocation}
-                    disabled={isLoadingLocation}
-                    startIcon={<LocationOnIcon />}
-                    sx={{ mb: 2 }}
-                  >
-                    {isLoadingLocation ? 'Detecting Location...' : 'Use My Location'}
-                  </Button> */}
-
-                  {!userLocation && (
-                    <Box sx={{ mb: 2 }}>
-                      {isLoadingLocation ? (
-                        <Typography variant="body2" color="textSecondary">
-                          Detecting your location...
-                        </Typography>
-                      ) : locationError ? (
-                        <Alert severity="info" sx={{ mb: 2 }}>
-                          {locationError}
-                        </Alert>
-                      ) : null}
-                    </Box>
-                  )}
-
-                  {userLocation && (
-                    <Box sx={{ mb: 2, display: "flex", alignItems: "center" }}>
-                      <LocationOnIcon color="primary" sx={{ mr: 1 }} />
-                      <Typography variant="body2">
-                        Detected location: {userLocation.city}
-                        {userLocation.state ? `, ${userLocation.state}` : ""}
-                      </Typography>
-                    </Box>
-                  )}
-
-                  {selectedAddress && (
-                    <Typography variant="body2" sx={{ mb: 2 }}>
-                      Delivering to: {selectedAddress.city}
-                      {selectedAddress.state
-                        ? `, ${selectedAddress.state}`
-                        : ""}
-                    </Typography>
-                  )}
-
+                  {/* Delivery Location & Estimated Date */}
                   <Box
                     sx={{
-                      p: 1.5,
-                      bgcolor:
-                        deliveryChargeInfo.charge === 0 ? "#e8f5e9" : "#f5f5f5",
-                      borderRadius: 1,
                       mb: 2,
+                      p: 1.5,
+                      bgcolor: "#f8f9fa",
+                      borderRadius: 1.5,
+                      border: "1px solid #e9ecef",
                     }}
                   >
-                    <Typography variant="subtitle2" gutterBottom>
-                      Delivery Charge:
-                    </Typography>
                     <Typography
-                      variant="body1"
-                      sx={{
-                        fontWeight: "bold",
-                        color:
-                          deliveryChargeInfo.charge === 0
-                            ? "#2e7d32"
-                            : "inherit",
-                      }}
+                      variant="subtitle2"
+                      sx={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 0.5, mb: 0.5 }}
                     >
-                      {deliveryChargeInfo.charge === null
-                        ? "Calculating..."
-                        : deliveryChargeInfo.charge === 0
-                        ? "FREE"
-                        : `₹${deliveryChargeInfo.charge}`}
+                      <LocationOnIcon fontSize="small" color="primary" />
+                      Delivery Destination
                     </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {deliveryChargeInfo.message}
-                    </Typography>
+                    {selectedAddress ? (
+                      <>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {selectedAddress.fullName} ({selectedAddress.addressType})
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary" display="block">
+                          {selectedAddress.city}, {selectedAddress.state} - {selectedAddress.pincode}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          sx={{ color: "#2e7d32", display: "block", mt: 0.5, fontWeight: 600 }}
+                        >
+                          Estimated Delivery: {getEstimatedDeliveryDate(selectedAddress.city).date}
+                        </Typography>
+                      </>
+                    ) : userLocation ? (
+                      <>
+                        <Typography variant="body2" color="textSecondary">
+                          Detected: {userLocation.city}{userLocation.state ? `, ${userLocation.state}` : ""}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          sx={{ color: "#2e7d32", display: "block", mt: 0.5, fontWeight: 600 }}
+                        >
+                          Estimated Delivery: {getEstimatedDeliveryDate(userLocation.city).date}
+                        </Typography>
+                      </>
+                    ) : (
+                      <Typography variant="caption" color="textSecondary">
+                        Please select a delivery address below for precise delivery time and charges.
+                      </Typography>
+                    )}
                   </Box>
-                  <Divider sx={{ my: 1 }} />
-                  <Box
-                    sx={{ display: "flex", justifyContent: "space-between" }}
-                  >
-                    <Typography variant="h6">Total:</Typography>
-                    <Typography variant="h6">
-                      ₹{calculateTotals(cart?.items).grandTotal}
-                    </Typography>
-                  </Box>
-                  {/* </Box> */}
+
+                  {/* Price Breakdown */}
+                  {(() => {
+                    const totals = calculateTotals(cart?.items);
+                    return (
+                      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.2 }}>
+                        <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                          <Typography variant="body2" color="textSecondary">
+                            Total MRP
+                          </Typography>
+                          <Typography variant="body2">₹{totals.mrpTotal}</Typography>
+                        </Box>
+
+                        {totals.productDiscount > 0 && (
+                          <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                            <Typography variant="body2" sx={{ color: "success.main" }}>
+                              Product / Category Discount
+                            </Typography>
+                            <Typography
+                              variant="body2"
+                              sx={{ color: "success.main", fontWeight: 600 }}
+                            >
+                              -₹{totals.productDiscount}
+                            </Typography>
+                          </Box>
+                        )}
+
+                        <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                          <Typography variant="body2" color="textSecondary">
+                            Subtotal
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            ₹{totals.finalTotal}
+                          </Typography>
+                        </Box>
+
+                        <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                          <Typography variant="body2" color="textSecondary">
+                            Delivery Fee
+                          </Typography>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 600,
+                              color: totals.deliveryCharge === 0 ? "success.main" : "inherit",
+                            }}
+                          >
+                            {totals.deliveryCharge === 0 ? "FREE" : `₹${totals.deliveryCharge}`}
+                          </Typography>
+                        </Box>
+
+                        {totals.finalTotal < 5000 && (
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: "#d35400",
+                              bgcolor: "#fef5e7",
+                              p: 0.8,
+                              borderRadius: 1,
+                              display: "block",
+                            }}
+                          >
+                            Add items worth ₹{5000 - totals.finalTotal} more to get <strong>Free Delivery</strong>!
+                          </Typography>
+                        )}
+                        {totals.finalTotal >= 5000 && (
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: "#27ae60",
+                              bgcolor: "#e8f8f5",
+                              p: 0.8,
+                              borderRadius: 1,
+                              fontWeight: 600,
+                              display: "block",
+                            }}
+                          >
+                            🎉 You've unlocked Free Delivery!
+                          </Typography>
+                        )}
+
+                        <Divider sx={{ my: 1 }} />
+
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
+                        >
+                          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                            Total Amount:
+                          </Typography>
+                          <Typography
+                            variant="h6"
+                            sx={{ fontWeight: 700, color: "#111" }}
+                          >
+                            ₹{totals.grandTotal}
+                          </Typography>
+                        </Box>
+
+                        {totals.productDiscount > 0 && (
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: "#2e7d32",
+                              fontWeight: 600,
+                              textAlign: "center",
+                              bgcolor: "#e8f5e9",
+                              py: 0.6,
+                              borderRadius: 1,
+                            }}
+                          >
+                            You save ₹{totals.productDiscount} on this order!
+                          </Typography>
+                        )}
+                      </Box>
+                    );
+                  })()}
 
                   <Button
                     variant="contained"
@@ -1027,6 +1196,11 @@ function Cart() {
                     sx={{
                       bgcolor: "#333",
                       "&:hover": { bgcolor: "#555" },
+                      mt: 2.5,
+                      py: 1.2,
+                      fontWeight: 600,
+                      borderRadius: 1.5,
+                      textTransform: "none",
                     }}
                   >
                     Proceed to Checkout

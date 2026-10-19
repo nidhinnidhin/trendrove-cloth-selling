@@ -179,6 +179,17 @@ const updateProductQuantity = asyncHandler(async (req, res) => {
     });
   }
 
+  const sizeVariant = await SizeVariant.findById(sizeVariantId);
+  if (!sizeVariant) {
+    return res.status(404).json({ message: "Size variant not found" });
+  }
+
+  if (quantity > sizeVariant.stockCount) {
+    return res.status(400).json({
+      message: `Only ${sizeVariant.stockCount} items available in stock`,
+    });
+  }
+
   if (quantity > 4) {
     return res
       .status(400)

@@ -5,6 +5,7 @@ const Size = require("../../models/product/sizesVariantModel");
 const asyncHandler = require("express-async-handler");
 const { mongoose } = require("mongoose");
 const Coupon = require("../../models/coupon/couponModal");
+const Wallet = require("../../models/wallet/walletModel");
 
 const orderPopulateConfig = [
   {
@@ -28,6 +29,24 @@ const orderPopulateConfig = [
     select: "fullName address city state pincode mobileNumber addressType",
   },
 ];
+
+// Helper: credit wallet for refund
+const creditWallet = async (userId, amount, description) => {
+  let wallet = await Wallet.findOne({ userId });
+  if (!wallet) {
+    wallet = new Wallet({ userId, balance: 0, transactions: [] });
+  }
+  wallet.balance += amount;
+  wallet.transactions.push({
+    userId,
+    type: "credit",
+    amount,
+    description,
+    date: new Date(),
+  });
+  await wallet.save();
+  return wallet;
+};
 
 const createCheckout = asyncHandler(async (req, res) => {
   const session = await mongoose.startSession();
@@ -84,8 +103,6 @@ const createCheckout = asyncHandler(async (req, res) => {
       sizeVariant.stockCount -= item.quantity;
       sizeVariant.inStock = sizeVariant.stockCount > 0;
       await sizeVariant.save({ session });
-
-      console.log(`Updated stock count for size variant ${sizeVariant._id}: ${sizeVariant.stockCount}`);
     }
 
     const address = await Address.findById(addressId);
@@ -94,7 +111,35 @@ const createCheckout = asyncHandler(async (req, res) => {
       return res.status(404).json({ message: "Address not found" });
     }
 
-    const deliveryCharge = finalTotal < 1000 ? 40 : 0;
+    const deliveryCharge =
+      req.body.deliveryCharge !== undefined
+        ? Number(req.body.deliveryCharge)
+        : finalTotal >= 5000
+        ? 0
+        : 100;
+
+    // If wallet payment, validate balance and deduct
+    if (paymentMethod === "wallet") {
+      let wallet = await Wallet.findOne({ userId: req.user.id });
+      const walletBalance = wallet ? wallet.balance : 0;
+      if (walletBalance < finalTotal) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient wallet balance. Available: ₹${walletBalance}, Required: ₹${finalTotal}`
+        });
+      }
+      // Deduct from wallet
+      wallet.balance -= finalTotal;
+      wallet.transactions.push({
+        userId: req.user.id,
+        type: "debit",
+        amount: finalTotal,
+        description: `Payment for order`,
+        date: new Date(),
+      });
+      await wallet.save({ session });
+    }
 
     // Create checkout document
     const newCheckout = new Checkout({
@@ -116,15 +161,15 @@ const createCheckout = asyncHandler(async (req, res) => {
       },
       payment: {
         method: paymentMethod,
-        status: paymentStatus,
+        status: paymentMethod === "wallet" ? "completed" : paymentStatus,
         transactionId,
         amount: finalTotal,
         paymentDate: new Date()
       },
       orderStatus: "pending",
       totalAmount: finalTotal,
-      couponCode,
-      discountAmount
+      couponCode: couponCode || "",
+      discountAmount: Number(discountAmount) || 0
     });
 
     await newCheckout.save({ session });
@@ -172,7 +217,6 @@ const returnProduct = asyncHandler(async (req, res) => {
     const { orderId, itemId } = req.params;
     const { reason, details } = req.body;
 
-    // Validate input
     if (!reason || !details?.trim()) {
       return res.status(400).json({
         success: false,
@@ -180,7 +224,6 @@ const returnProduct = asyncHandler(async (req, res) => {
       });
     }
 
-    // Find the order with populated items
     const order = await Checkout.findOne({
       _id: orderId,
       user: req.user.id,
@@ -193,7 +236,6 @@ const returnProduct = asyncHandler(async (req, res) => {
       });
     }
 
-    // Find the specific item in the order
     const itemIndex = order.items.findIndex(
       (item) => item._id.toString() === itemId
     );
@@ -207,7 +249,6 @@ const returnProduct = asyncHandler(async (req, res) => {
 
     const item = order.items[itemIndex];
 
-    // Check if item is eligible for return
     if (item.status !== "Delivered") {
       return res.status(400).json({
         success: false,
@@ -222,7 +263,6 @@ const returnProduct = asyncHandler(async (req, res) => {
       });
     }
 
-    // Update the item with return request
     order.items[itemIndex].returnRequested = true;
     order.items[itemIndex].returnReason = reason;
     order.items[itemIndex].additionalDetails = details;
@@ -232,7 +272,7 @@ const returnProduct = asyncHandler(async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Return request submitted successfully",
+      message: "Return request submitted successfully. Refund will be credited to your wallet once approved.",
       order: {
         orderId: order._id,
         items: order.items.map((item) => ({
@@ -282,23 +322,33 @@ const getOrders = asyncHandler(async (req, res) => {
       items: order.items.map((item) => ({
         itemId: item._id,
         status: item.status,
-        productId: item.product?._id, // Add productId
+        productId: item.product?._id,
         productName: item.product?.name || "N/A",
         price: item.price || 0,
         finalPrice: item.finalPrice || 0,
         quantity: item.quantity,
-        variantId: item.variant?._id, // Add variantId
+        variantId: item.variant?._id,
         color: item.variant?.color || "N/A",
-        sizeVariantId: item.sizeVariant?._id, // Add sizeVariantId
+        sizeVariantId: item.sizeVariant?._id,
         size: item.sizeVariant?.size || "N/A",
         image: item.variant?.mainImage || "N/A",
+        returnRequested: item.returnRequested || false,
+        returnStatus: item.returnStatus,
       })),
       totalAmount: order.totalAmount,
-      deliveryCharge: order.shipping.deliveryCharge,
-      couponCode: order.couponCode,
+      deliveryCharge:
+        order.shipping?.deliveryCharge !== undefined
+          ? order.shipping.deliveryCharge
+          : 0,
+      couponCode: order.couponCode || "",
       discountAmount: order.discountAmount || 0,
+      couponDiscount: order.discountAmount || 0,
       subTotal: order.items.reduce(
-        (sum, item) => sum + item.price * item.quantity,
+        (sum, item) => sum + (item.finalPrice || item.price) * item.quantity,
+        0
+      ),
+      mrpTotal: order.items.reduce(
+        (sum, item) => sum + (item.price || 0) * item.quantity,
         0
       ),
     }));
@@ -380,9 +430,48 @@ const cancelOrder = asyncHandler(async (req, res) => {
     await order.save({ session });
     await session.commitTransaction();
 
+    // Credit wallet if payment was online or wallet (not COD)
+    const refundableMethod = ["online", "wallet"].includes(order.payment.method);
+    const refundablePaymentStatus = ["completed", "pending"].includes(order.payment.status);
+
+    let walletCredited = false;
+    let refundAmount = 0;
+
+    if (refundableMethod && refundablePaymentStatus) {
+      // Calculate proportional refund for this item
+      const totalItems = order.items.filter(i => i._id.toString() !== itemId);
+      const allActiveItemsTotal = order.items.reduce(
+        (sum, i) => sum + (i.finalPrice || i.price) * i.quantity,
+        0
+      );
+      const thisItemTotal = (item.finalPrice || item.price) * item.quantity;
+      
+      // If all items are now cancelled, refund totalAmount; else proportional
+      if (allCancelled) {
+        refundAmount = order.totalAmount;
+      } else {
+        // Proportional share of the total order amount
+        const proportion = allActiveItemsTotal > 0 ? thisItemTotal / allActiveItemsTotal : 0;
+        refundAmount = Math.round(order.totalAmount * proportion);
+      }
+
+      if (refundAmount > 0) {
+        await creditWallet(
+          order.user,
+          refundAmount,
+          `Refund for cancelled item in Order #${order._id}`
+        );
+        walletCredited = true;
+      }
+    }
+
     res.status(200).json({
       success: true,
-      message: "Order item cancelled successfully",
+      message: walletCredited
+        ? `Order item cancelled. ₹${refundAmount} has been credited to your wallet.`
+        : "Order item cancelled successfully.",
+      walletCredited,
+      refundAmount,
       order,
     });
   } catch (error) {

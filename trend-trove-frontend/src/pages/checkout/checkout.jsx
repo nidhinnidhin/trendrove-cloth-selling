@@ -24,6 +24,7 @@ import {
   InputLabel,
   Snackbar,
   Alert,
+  Chip,
 } from "@mui/material";
 import {
   LocationOn,
@@ -51,6 +52,7 @@ const CheckoutPage = () => {
   const [showLoader, setShowLoader] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [snackbarSeverity, setSnackbarSeverity] = useState("info");
+  const [walletBalance, setWalletBalance] = useState(0);
 
   useEffect(() => {
     if (router.query.data) {
@@ -77,6 +79,8 @@ const CheckoutPage = () => {
     if (checkoutData) {
       fetchCoupons();
     }
+    // Fetch wallet balance when checkout page loads
+    fetchWalletBalance().then(balance => setWalletBalance(balance));
   }, [checkoutData]);
 
   const calculatePreviewDiscount = (couponCode, totalPrice) => {
@@ -152,14 +156,9 @@ const CheckoutPage = () => {
   const fetchWalletBalance = async () => {
     try {
       const response = await axiosInstance.get("/wallet/details");
-      console.log("Wallet balance", response);
-
-      return response.data.balance + response.data.referralEarnings;
+      return Number(response.data.balance || 0);
     } catch (error) {
       console.error("Error fetching wallet balance:", error);
-      setSnackbarMessage("Failed to fetch wallet balance");
-      setSnackbarSeverity("error");
-      setSnackbarOpen(true);
       return 0;
     }
   };
@@ -168,6 +167,7 @@ const CheckoutPage = () => {
     try {
       setLoading(true);
 
+      const validDiscount = Math.min(Number(previewDiscount || 0), Number(totalPrice || 0));
       // First create checkout and get its ID
       const checkoutPayload = {
         cartId: checkoutData.cartId,
@@ -177,11 +177,16 @@ const CheckoutPage = () => {
         transactionId: "pending",
         paymentStatus: "pending",
         finalTotal: previewTotal,
-        couponCode: selectedCoupon,
-        discountAmount: previewDiscount,
+        deliveryCharge: Number(deliveryCharge || 0),
+        couponCode: selectedCoupon || "",
+        discountAmount: validDiscount,
         items: cartItems.map((item) => ({
-          ...item,
-          finalPrice: item.sizeVariant.discountPrice * item.quantity,
+          product: item.product._id,
+          variant: item.variant._id,
+          sizeVariant: item.sizeVariant._id,
+          quantity: item.quantity,
+          price: item.sizeVariant.price,
+          finalPrice: item.sizeVariant.discountPrice || item.sizeVariant.price,
         })),
       };
 
@@ -312,6 +317,7 @@ const CheckoutPage = () => {
   const handleCashOnDelivery = async () => {
     try {
       setLoading(true);
+      const validDiscount = Math.min(Number(previewDiscount || 0), Number(totalPrice || 0));
       const checkoutPayload = {
         cartId: checkoutData.cartId,
         addressId: selectedAddress._id,
@@ -319,11 +325,17 @@ const CheckoutPage = () => {
         paymentMethod: "cod",
         transactionId: "COD_" + Date.now(),
         paymentStatus: "pending",
-        couponCode: selectedCoupon,
+        couponCode: selectedCoupon || "",
+        discountAmount: validDiscount,
+        deliveryCharge: Number(deliveryCharge || 0),
         finalTotal: previewTotal,
         items: cartItems.map((item) => ({
-          ...item,
-          finalPrice: item.sizeVariant.discountPrice * item.quantity,
+          product: item.product._id,
+          variant: item.variant._id,
+          sizeVariant: item.sizeVariant._id,
+          quantity: item.quantity,
+          price: item.sizeVariant.price,
+          finalPrice: item.sizeVariant.discountPrice || item.sizeVariant.price,
         })),
       };
 
@@ -368,17 +380,28 @@ const CheckoutPage = () => {
       setLoading(true);
       setShowLoader(true);
 
+      const validDiscount = Math.min(Number(previewDiscount || 0), Number(totalPrice || 0));
       const checkoutPayload = {
         cartId: checkoutData.cartId,
         addressId: selectedAddress._id,
         shippingMethod: "Standard",
         paymentMethod: paymentMethod,
         transactionId:
-          paymentMethod === "cod" || "debit" ? "COD_" + Date.now() : null,
+          paymentMethod === "cod" ? "COD_" + Date.now() : 
+          paymentMethod === "wallet" ? "WALLET_" + Date.now() : null,
         paymentStatus: "pending",
-        couponCode: selectedCoupon,
+        couponCode: selectedCoupon || "",
+        discountAmount: validDiscount,
+        deliveryCharge: Number(deliveryCharge || 0),
         finalTotal: previewTotal,
-        discountAmount: previewDiscount,
+        items: cartItems.map((item) => ({
+          product: item.product._id,
+          variant: item.variant._id,
+          sizeVariant: item.sizeVariant._id,
+          quantity: item.quantity,
+          price: item.sizeVariant.price,
+          finalPrice: item.sizeVariant.discountPrice || item.sizeVariant.price,
+        })),
       };
 
       if (paymentMethod === "online") {
@@ -387,26 +410,20 @@ const CheckoutPage = () => {
       }
 
       if (paymentMethod === "wallet") {
-        const walletBalance = await fetchWalletBalance();
-        if (walletBalance < previewTotal) {
-          setSnackbarMessage("Insufficient wallet balance");
+        // Refresh balance to get latest
+        const freshBalance = await fetchWalletBalance();
+        setWalletBalance(freshBalance);
+        if (freshBalance < previewTotal) {
+          setSnackbarMessage(
+            `Insufficient wallet balance. Available: ₹${freshBalance.toLocaleString('en-IN')}, Required: ₹${previewTotal.toLocaleString('en-IN')}`
+          );
           setSnackbarSeverity("error");
           setSnackbarOpen(true);
           setLoading(false);
           setShowLoader(false);
           return;
         }
-
-        // Deduct amount from wallet
-        const deductResponse = await axiosInstance.post("/wallet/transaction", {
-          amount: previewTotal,
-          type: "debit",
-          description: "Payment for order",
-        });
-
-        if (!deductResponse.data.success) {
-          throw new Error("Failed to deduct amount from wallet");
-        }
+        // Backend handles wallet deduction — no need to call /wallet/transaction here
       }
 
       const response = await axiosInstance.post(
@@ -544,10 +561,11 @@ const CheckoutPage = () => {
     return <Typography>Loading...</Typography>;
   }
 
-  const { cartItems, totalPrice, selectedAddress, deliveryCharge } =
+  const { cartItems = [], totalPrice = 0, mrpTotal = 0, productDiscount = 0, selectedAddress, deliveryCharge = 0 } =
     checkoutData;
-  // const deliveryCharge = totalPrice < 1000 ? 40 : 0;
-  const previewTotal = totalPrice - previewDiscount + deliveryCharge;
+  const validDiscount = Math.min(Number(previewDiscount || 0), Number(totalPrice || 0));
+  const previewTotal = Math.max(0, Number(totalPrice || 0) - validDiscount) + Number(deliveryCharge || 0);
+  const totalSavings = Number(productDiscount || 0) + validDiscount;
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -634,42 +652,85 @@ const CheckoutPage = () => {
                       </Typography>
                     </TableCell>
                     <TableCell align="right">
-                      ₹{item.sizeVariant.discountPrice * item.quantity}
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        ₹{(item.sizeVariant?.discountPrice !== undefined && item.sizeVariant.discountPrice !== null ? item.sizeVariant.discountPrice : item.sizeVariant?.price) * item.quantity}
+                      </Typography>
+                      {item.sizeVariant?.discountPrice !== undefined &&
+                        item.sizeVariant.discountPrice !== null &&
+                        item.sizeVariant.discountPrice < item.sizeVariant.price && (
+                          <Typography variant="caption" sx={{ textDecoration: "line-through", color: "text.secondary", display: "block" }}>
+                            ₹{item.sizeVariant.price * item.quantity}
+                          </Typography>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
-                <TableRow>
-                  <TableCell colSpan={2}>
-                    <Typography variant="subtitle1">Subtotal</Typography>
-                  </TableCell>
-                  <TableCell align="right">₹{totalPrice}</TableCell>
-                </TableRow>
-                {previewDiscount > 0 && (
+
+                {/* Price Breakdown */}
+                {mrpTotal > 0 && mrpTotal !== totalPrice && (
                   <TableRow>
                     <TableCell colSpan={2}>
-                      <Typography variant="subtitle1" color="success.main">
-                        Coupon Discount (will be applied at checkout)
-                      </Typography>
+                      <Typography variant="body2" color="textSecondary">Total MRP</Typography>
                     </TableCell>
-                    <TableCell align="right" sx={{ color: "success.main" }}>
-                      -₹{previewDiscount}
+                    <TableCell align="right">
+                      <Typography variant="body2">₹{mrpTotal}</Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {Number(productDiscount || 0) > 0 && (
+                  <TableRow>
+                    <TableCell colSpan={2}>
+                      <Typography variant="body2" sx={{ color: "success.main" }}>Product / Category Discount</Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" sx={{ color: "success.main", fontWeight: 600 }}>-₹{productDiscount}</Typography>
                     </TableCell>
                   </TableRow>
                 )}
                 <TableRow>
                   <TableCell colSpan={2}>
-                    <Typography variant="subtitle1">Delivery</Typography>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Subtotal (After Discounts)</Typography>
                   </TableCell>
                   <TableCell align="right">
-                    {deliveryCharge === 0
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>₹{totalPrice}</Typography>
+                  </TableCell>
+                </TableRow>
+                {validDiscount > 0 && (
+                  <TableRow>
+                    <TableCell colSpan={2}>
+                      <Typography variant="subtitle1" color="success.main">
+                        Coupon Discount {selectedCoupon ? `(${selectedCoupon})` : ""}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ color: "success.main", fontWeight: 600 }}>
+                      -₹{validDiscount}
+                    </TableCell>
+                  </TableRow>
+                )}
+                <TableRow>
+                  <TableCell colSpan={2}>
+                    <Typography variant="subtitle1">Delivery Fee</Typography>
+                  </TableCell>
+                  <TableCell align="right" sx={{ color: Number(deliveryCharge) === 0 ? "success.main" : "inherit" }}>
+                    {Number(deliveryCharge) === 0
                       ? "Free delivery"
                       : `₹${deliveryCharge}`}
                   </TableCell>
                 </TableRow>
-                <TableRow>
+                {totalSavings > 0 && (
+                  <TableRow sx={{ bgcolor: "#f1f8e9" }}>
+                    <TableCell colSpan={2}>
+                      <Typography variant="body2" sx={{ color: "success.dark", fontWeight: 600 }}>🎉 Total Savings</Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" sx={{ color: "success.dark", fontWeight: 700 }}>-₹{totalSavings}</Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+                <TableRow sx={{ bgcolor: "#f5f5f5" }}>
                   <TableCell colSpan={2}>
                     <Typography variant="subtitle1" sx={{ fontWeight: "bold" }}>
-                      Total
+                      Total Amount
                     </Typography>
                   </TableCell>
                   <TableCell align="right">
@@ -740,13 +801,24 @@ const CheckoutPage = () => {
                 control={<Radio />}
                 label={
                   <Box sx={{ display: "flex", alignItems: "center" }}>
-                    <AccountBalanceWallet sx={{ mr: 1 }} />
+                    <AccountBalanceWallet sx={{ mr: 1, color: walletBalance >= previewTotal ? "#16a34a" : "#f59e0b" }} />
                     <Box>
-                      <Typography variant="subtitle1">
-                        Pay with Wallet
-                      </Typography>
-                      <Typography variant="body2" color="textSecondary">
-                        Use your digital wallet balance
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                          Pay with Wallet
+                        </Typography>
+                        <Chip
+                          label={`₹${(walletBalance || 0).toLocaleString("en-IN")}`}
+                          size="small"
+                          color={walletBalance >= previewTotal ? "success" : "error"}
+                          variant="outlined"
+                          sx={{ fontWeight: 700, fontSize: "0.75rem", height: "20px" }}
+                        />
+                      </Box>
+                      <Typography variant="body2" color={walletBalance >= previewTotal ? "textSecondary" : "error"}>
+                        {walletBalance >= previewTotal
+                          ? "Use your digital wallet balance to pay directly"
+                          : `Insufficient balance (Need ₹${(previewTotal - walletBalance).toLocaleString("en-IN")} more)`}
                       </Typography>
                     </Box>
                   </Box>
