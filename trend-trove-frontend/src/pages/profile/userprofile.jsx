@@ -1148,6 +1148,7 @@ const UserProfilePage = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
+                      {/* issue */}
                       {txns.map((txn, idx) => {
                         const isCredit = txn.type === "credit";
                         const date = new Date(txn.date);
